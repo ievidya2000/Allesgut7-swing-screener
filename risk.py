@@ -65,7 +65,9 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
             model = MarkovRegression(
                 returns, k_regimes=2, trend='c', switching_variance=True
             )
-            res = model.fit(disp=False, maxiter=15)
+            res = model.fit(disp=False, maxiter=50)
+            if not res.mle_retvals.get('converged', False):
+                raise ValueError("Markov model did not converge")
 
             mu = np.empty(2)
             sigma = np.empty(2)
@@ -79,8 +81,9 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
             p00 = next(res.params[k] for k in p_keys if '0->0' in k or '0,0' in k)
             p10 = next(res.params[k] for k in p_keys if '1->0' in k or '1,0' in k)
             transition_matrix = np.array([[p00, 1 - p00], [p10, 1 - p10]])
-        except Exception:
+        except Exception as e:
             use_markov = False
+            print(f"Markov fit failed: {e}", flush=True)
 
         if markov_cache is not None and markov_cache_key is not None:
             if use_markov:

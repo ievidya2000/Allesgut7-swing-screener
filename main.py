@@ -2,7 +2,7 @@ import sys
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore", message=".*could not convert.*")
-warnings.filterwarnings("ignore", message=".*valid.*convergent.*")
+warnings.filterwarnings("default", message=".*valid.*convergent.*")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
