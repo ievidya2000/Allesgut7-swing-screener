@@ -17,7 +17,7 @@ fi
 # export TO_EMAIL="recipient@example.com"
 
 # Run daily summary
-python -m screener_v2.performance.run daily >> logs/cron.log 2>&1
+python -m performance.run daily >> logs/cron.log 2>&1
 
 # Exit with the exit code of the python command
 exit $?

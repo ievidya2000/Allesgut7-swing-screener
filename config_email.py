@@ -4,7 +4,7 @@ import os
 import json
 from pathlib import Path
 
-EMAIL_CONFIG_FILE = Path(__file__).parent.parent / "email_config.json"
+EMAIL_CONFIG_FILE = Path(__file__).parent / "email_config.json"
 
 DEFAULT_CONFIG = {
     "smtp_server": "smtp.gmail.com",

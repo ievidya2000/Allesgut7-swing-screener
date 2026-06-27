@@ -6,17 +6,17 @@ warnings.filterwarnings("ignore", message=".*valid.*convergent.*")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from screener_v2.config import TICKERS, SELECTED_TP, SETUP_ORDER, SIGNAL_MAP, MAX_DISPLAY
-from screener_v2.data import get_all_market_data, get_jkse_data
-from screener_v2.indicators import calculate_full_indicators
-from screener_v2.signals import (
+from config import TICKERS, SELECTED_TP, SETUP_ORDER, SIGNAL_MAP, MAX_DISPLAY
+from data import get_all_market_data, get_jkse_data
+from indicators import calculate_full_indicators
+from signals import (
     determine_market_regime, determine_stock_regime, classify_setup_state
 )
-from screener_v2.risk import calculate_tp_sl, simulate_tp_sl_probability
-from screener_v2.adaptive.config import load_adaptive_config
-from screener_v2.analysis import generate_deep_analysis
-from screener_v2.deep_analysis import generate_report as deep_report
-from screener_v2.output import (
+from risk import calculate_tp_sl, simulate_tp_sl_probability
+from adaptive.config import load_adaptive_config
+from analysis import generate_deep_analysis
+from deep_analysis import generate_report as deep_report
+from output import (
     print_banner, print_summary, print_header, print_subheader,
     print_analysis_box, sep
 )
@@ -269,7 +269,7 @@ def run_screener():
 
     # Performance: log predictions + check open trades
     try:
-        from screener_v2.performance.realtime import (
+        from performance.realtime import (
             log_new_predictions, check_open_trades, print_performance_summary
         )
         print()
@@ -349,7 +349,7 @@ def run_screener():
 def cli_analyze(ticker):
     """Run analysis for a single ticker via CLI."""
     import yfinance as yf
-    from screener_v2.data import normalize_yfinance_df, load_ticker_cache, save_ticker_cache
+    from data import normalize_yfinance_df, load_ticker_cache, save_ticker_cache
 
     print(f"  Loading data for {ticker}...")
 

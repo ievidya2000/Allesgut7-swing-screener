@@ -4,7 +4,7 @@ import yfinance as yf
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from screener_v2.config import (
+from config import (
     CACHE_DIR, CACHE_MAX_AGE_HOURS, BATCH_SIZE,
     DOWNLOAD_PERIOD, DOWNLOAD_INTERVAL, JKSE_TICKER
 )

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from collections import defaultdict
 
-from screener_v2.performance.journal import init_db, get_trade_results, get_all_predictions
+from performance.journal import init_db, get_trade_results, get_all_predictions
 
 
 def parse_probability(prob_str):
@@ -136,7 +136,7 @@ def plot_reliability_diagram(save_path=None):
     plt.tight_layout()
 
     if save_path is None:
-        save_path = Path(__file__).parent.parent.parent / "calibration_plot.png"
+        save_path = Path(__file__).parent.parent / "calibration_plot.png"
 
     plt.savefig(str(save_path), dpi=150, bbox_inches="tight")
     plt.close()

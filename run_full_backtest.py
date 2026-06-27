@@ -6,7 +6,7 @@ warnings.filterwarnings('ignore')
 start = time.time()
 print(f"Backtest started at {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 
-from screener_v2.performance.backtest import run_historical_backtest
+from performance.backtest import run_historical_backtest
 report = run_historical_backtest(start_date='2016-01-01', end_date='2026-06-25')
 
 elapsed = time.time() - start

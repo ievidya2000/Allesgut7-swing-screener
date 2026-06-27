@@ -1,15 +1,15 @@
 import pandas as pd
 from datetime import datetime, timedelta
 
-from screener_v2.performance.journal import (
+from performance.journal import (
     init_db, get_pending_predictions, get_active_predictions,
     get_all_predictions, update_prediction_status,
     log_prediction, log_trade_result, get_journal_summary
 )
-from screener_v2.performance.backtest import check_tp_sl_hit
-from screener_v2.performance.calibration import print_calibration_report
-from screener_v2.performance.metrics import full_report, format_report
-from screener_v2.utils.date_utils import normalize_screen_date
+from performance.backtest import check_tp_sl_hit
+from performance.calibration import print_calibration_report
+from performance.metrics import full_report, format_report
+from utils.date_utils import normalize_screen_date
 
 
 def log_new_predictions(results, market_regime):
@@ -63,8 +63,8 @@ def check_open_trades(market_data=None):
     closed = 0
 
     if market_data is None:
-        from screener_v2.data import get_all_market_data
-        from screener_v2.config import TICKERS
+        from data import get_all_market_data
+        from config import TICKERS
         market_data = get_all_market_data(TICKERS)
 
     for pred in pending:
@@ -179,7 +179,7 @@ def print_performance_summary():
     print(f"  {'─'*40}")
 
     if (summary["closed_trades"] or 0) > 0:
-        from screener_v2.performance.journal import get_trade_results
+        from performance.journal import get_trade_results
         trades = get_trade_results(filters={"status": "CLOSED"})
         if trades:
             report = full_report(trades)

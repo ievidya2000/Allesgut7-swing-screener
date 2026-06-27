@@ -6,17 +6,17 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from screener_v2.config import INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, MC_HORIZON
-from screener_v2.performance.journal import (
+from config import INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, MC_HORIZON
+from performance.journal import (
     init_db, get_pending_predictions, get_active_predictions,
     update_prediction_status, log_portfolio_snapshot, get_portfolio_snapshots
 )
-from screener_v2.performance.metrics import (
+from performance.metrics import (
     sharpe_ratio, sortino_ratio, max_drawdown, max_drawdown_abs,
     calmar_ratio, format_report, full_report
 )
-from screener_v2.data import get_jkse_data
-from screener_v2.utils.date_utils import normalize_screen_date, safe_screen_date_str
+from data import get_jkse_data
+from utils.date_utils import normalize_screen_date, safe_screen_date_str
 
 
 class PortfolioSimulator:
@@ -176,8 +176,8 @@ def simulate_portfolio(start_date=None, end_date=None, initial_capital=None):
     print(f"  Initial Capital: Rp {initial_capital or INITIAL_CAPITAL:,.0f}")
     print(f"{'='*60}\n")
 
-    from screener_v2.data import get_all_market_data
-    from screener_v2.config import TICKERS
+    from data import get_all_market_data
+    from config import TICKERS
 
     print("[1/3] Loading market data...")
     market_data = get_all_market_data(TICKERS)
@@ -283,7 +283,7 @@ def plot_equity_curve(sim, save_path=None):
     plt.tight_layout()
 
     if save_path is None:
-        save_path = Path(__file__).parent.parent.parent / "equity_curve.png"
+        save_path = Path(__file__).parent.parent / "equity_curve.png"
 
     plt.savefig(str(save_path), dpi=150, bbox_inches="tight")
     plt.close()

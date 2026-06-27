@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
-from screener_v2.config import TICKERS, MAX_POSITIONS, INITIAL_CAPITAL, ADX_THRESHOLD
-from screener_v2.data import get_all_market_data, get_jkse_data
-from screener_v2.signals import determine_market_regime
-from screener_v2.adaptive.config import (
+from config import TICKERS, MAX_POSITIONS, INITIAL_CAPITAL, ADX_THRESHOLD
+from data import get_all_market_data, get_jkse_data
+from signals import determine_market_regime
+from adaptive.config import (
     save_adaptive_config, DEFAULT_CONFIG,
     load_adaptive_config, save_to_history, get_latest_history, has_config_changed
 )
@@ -33,7 +33,7 @@ class ParameterOptimizer:
         self.best_sharpe = -999
 
     def _precompute_indicators(self, market_data, params):
-        from screener_v2.indicators import calculate_full_indicators
+        from indicators import calculate_full_indicators
 
         precomputed = {}
         for ticker, df in market_data.items():
@@ -47,8 +47,8 @@ class ParameterOptimizer:
         return precomputed
 
     def _scan_from_precomputed(self, precomputed, signal_date, market_regime, params):
-        from screener_v2.signals import determine_stock_regime, classify_setup_state
-        from screener_v2.risk import calculate_tp_sl
+        from signals import determine_stock_regime, classify_setup_state
+        from risk import calculate_tp_sl
 
         results = []
         adx_thresh = params.get("adx_threshold", ADX_THRESHOLD)

@@ -6,15 +6,15 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from screener_v2.performance.journal import (
+from performance.journal import (
     init_db, get_all_predictions, get_trade_results, get_journal_summary
 )
-from screener_v2.performance.realtime import run_full_check
-from screener_v2.performance.metrics import (
+from performance.realtime import run_full_check
+from performance.metrics import (
     win_rate, avg_return, profit_factor
 )
 
-LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 DAILY_LOG = LOG_DIR / "daily_summary.json"
@@ -276,7 +276,7 @@ def check_and_archive():
 
 
 def run_daily_summary():
-    from screener_v2.notifications import send_daily_summary_email, send_archive_email
+    from notifications import send_daily_summary_email, send_archive_email
 
     logger.info("Starting daily performance summary...")
 

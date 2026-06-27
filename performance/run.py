@@ -2,13 +2,13 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 
-from screener_v2.performance.journal import init_db, get_all_predictions, get_trade_results, get_journal_summary
-from screener_v2.performance.metrics import full_report, format_report
-from screener_v2.utils.date_utils import safe_screen_date_str
+from performance.journal import init_db, get_all_predictions, get_trade_results, get_journal_summary
+from performance.metrics import full_report, format_report
+from utils.date_utils import safe_screen_date_str
 
 
 def cmd_backtest(args):
-    from screener_v2.performance.backtest import run_historical_backtest
+    from performance.backtest import run_historical_backtest
 
     start = args.start_date
     end = args.end_date
@@ -27,7 +27,7 @@ def cmd_backtest(args):
 
 
 def cmd_calibration(args):
-    from screener_v2.performance.calibration import print_calibration_report, plot_reliability_diagram
+    from performance.calibration import print_calibration_report, plot_reliability_diagram
 
     print_calibration_report()
     if args.plot:
@@ -35,7 +35,7 @@ def cmd_calibration(args):
 
 
 def cmd_portfolio(args):
-    from screener_v2.performance.portfolio import simulate_portfolio, plot_equity_curve
+    from performance.portfolio import simulate_portfolio, plot_equity_curve
 
     start = args.start_date
     end = args.end_date
@@ -57,7 +57,7 @@ def cmd_portfolio(args):
 
 
 def cmd_check(args):
-    from screener_v2.performance.realtime import run_full_check
+    from performance.realtime import run_full_check
 
     run_full_check()
 
@@ -145,7 +145,7 @@ def cmd_report(args):
 
 
 def cmd_optimize(args):
-    from screener_v2.adaptive.optimizer import ParameterOptimizer
+    from adaptive.optimizer import ParameterOptimizer
 
     start = args.start_date
     end = args.end_date
@@ -177,7 +177,7 @@ def cmd_optimize(args):
 
 
 def cmd_rolling_optimize(args):
-    from screener_v2.adaptive.optimizer import ParameterOptimizer
+    from adaptive.optimizer import ParameterOptimizer
 
     optimizer = ParameterOptimizer()
 
@@ -196,7 +196,7 @@ def cmd_rolling_optimize(args):
 
 
 def cmd_daily(args):
-    from screener_v2.performance.daily_summary import run_daily_summary
+    from performance.daily_summary import run_daily_summary
     run_daily_summary()
 
 

@@ -62,10 +62,10 @@ streamlit run streamlit_app.py
 
 ```bash
 # Full screening
-python -m screener_v2.main
+python -m main
 
 # Single ticker analysis
-python -m screener_v2.main --analyze BBCA.JK
+python -m main --analyze BBCA.JK
 ```
 
 ---
@@ -184,45 +184,45 @@ screener_v2/
 
 ```bash
 # Full screening (all tickers)
-python -m screener_v2.main
+python -m main
 
 # Single ticker analysis
-python -m screener_v2.main --analyze BBCA.JK
+python -m main --analyze BBCA.JK
 ```
 
 ### Performance Tools
 
 ```bash
 # Backtest
-python -m screener_v2.performance.run backtest
-python -m screener_v2.performance.run backtest --start-date 2024-01-01 --end-date 2025-12-31
+python -m performance.run backtest
+python -m performance.run backtest --start-date 2024-01-01 --end-date 2025-12-31
 
 # Portfolio simulation
-python -m screener_v2.performance.run portfolio --capital 100000000
+python -m performance.run portfolio --capital 100000000
 
 # Calibration check
-python -m screener_v2.performance.run calibration
+python -m performance.run calibration
 
 # View journal
-python -m screener_v2.performance.run journal --summary
-python -m screener_v2.performance.run journal --status PENDING
+python -m performance.run journal --summary
+python -m performance.run journal --status PENDING
 
 # View trade results
-python -m screener_v2.performance.run trades --exit-reason TP1
+python -m performance.run trades --exit-reason TP1
 
 # Full performance report
-python -m screener_v2.performance.run report
+python -m performance.run report
 ```
 
 ### Adaptive Learning
 
 ```bash
 # Parameter optimization
-python -m screener_v2.performance.run optimize --max-combos 50
+python -m performance.run optimize --max-combos 50
 
 # Rolling optimization
-python -m screener_v2.performance.run rolling-optimize
-python -m screener_v2.performance.run rolling-optimize --history
+python -m performance.run rolling-optimize
+python -m performance.run rolling-optimize --history
 ```
 
 ---
@@ -326,7 +326,7 @@ export TO_EMAIL="recipient@example.com"
 
 | Error | Solution |
 |-------|----------|
-| `ModuleNotFoundError: No module named 'screener_v2'` | Run from repo root, not inside `screener_v2/` |
+| `ModuleNotFoundError` | Run from repo root (`screener_v2/`), ensure `__init__.py` exists |
 | `yfinance download failed` | Check internet connection; data cached 18h in `cache_yfinance/` |
 | `SQLite database is locked` | Close other instances using the database |
 | Email not sending | Check SMTP credentials in `secrets.toml` or env vars |

@@ -3,7 +3,7 @@ import pandas as pd
 import warnings
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
-from screener_v2.config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
+from config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
 
 
 def calculate_tp_sl(close, atr, signal_type, custom_params=None):

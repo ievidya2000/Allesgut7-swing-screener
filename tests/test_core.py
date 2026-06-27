@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_calculate_tp_sl_buy():
-    from screener_v2.risk import calculate_tp_sl
+    from risk import calculate_tp_sl
     sl, tp1, tp2, tp3, profit_pct, risk_pct = calculate_tp_sl(1000, 50, "BUY")
     assert sl < 1000
     assert tp1 > 1000
@@ -15,20 +15,20 @@ def test_calculate_tp_sl_buy():
 
 
 def test_calculate_tp_sl_custom_params():
-    from screener_v2.risk import calculate_tp_sl
+    from risk import calculate_tp_sl
     sl, tp1, tp2, tp3, _, _ = calculate_tp_sl(1000, 50, "BUY", {"sl_multiplier": 2.0, "rr1": 3.0})
     assert sl == pytest.approx(900, abs=1)
     assert tp1 > 1000
 
 
 def test_calculate_tp_sl_invalid():
-    from screener_v2.risk import calculate_tp_sl
+    from risk import calculate_tp_sl
     result = calculate_tp_sl(1000, 50, "HOLD")
     assert result == (None, None, None, None, None, None)
 
 
 def test_check_tp_sl_hit_sl():
-    from screener_v2.performance.backtest import check_tp_sl_hit
+    from performance.backtest import check_tp_sl_hit
     df = pd.DataFrame({
         "High": [1050, 1060, 1040],
         "Low": [980, 990, 970],
@@ -40,7 +40,7 @@ def test_check_tp_sl_hit_sl():
 
 
 def test_check_tp_sl_hit_timeout():
-    from screener_v2.performance.backtest import check_tp_sl_hit
+    from performance.backtest import check_tp_sl_hit
     df = pd.DataFrame({
         "High": [1010, 1015, 1020],
         "Low": [990, 985, 995],
@@ -52,14 +52,14 @@ def test_check_tp_sl_hit_timeout():
 
 
 def test_simulate_tp_sl_probability_insufficient_data():
-    from screener_v2.risk import simulate_tp_sl_probability
+    from risk import simulate_tp_sl_probability
     df = pd.DataFrame({"Close": np.random.randn(10).cumsum() + 1000})
     result = simulate_tp_sl_probability(df, 1000, 950, 1050, 1100, 1150)
     assert result is None
 
 
 def test_signal_map_coverage():
-    from screener_v2.config import SIGNAL_MAP, SETUP_ORDER
+    from config import SIGNAL_MAP, SETUP_ORDER
     for setup in SETUP_ORDER:
         assert setup in SIGNAL_MAP
     assert SIGNAL_MAP["BREAKOUT"] == "STRONG BUY"
@@ -67,7 +67,7 @@ def test_signal_map_coverage():
 
 
 def test_thread_local_db():
-    from screener_v2.performance.journal import _get_conn
+    from performance.journal import _get_conn
     conn = _get_conn()
     assert conn is not None
     conn2 = _get_conn()

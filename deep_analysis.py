@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from screener_v2.indicators import (
+from indicators import (
     get_supertrend, get_ichimoku, rma, calculate_full_indicators
 )
-from screener_v2.signals import determine_stock_regime, classify_setup_state
-from screener_v2.analysis import generate_deep_analysis
-from screener_v2.patterns import detect_patterns
-from screener_v2.data import normalize_yfinance_df
-from screener_v2.config import ATR_LENGTH, ATR_MULTIPLIER
+from signals import determine_stock_regime, classify_setup_state
+from analysis import generate_deep_analysis
+from patterns import detect_patterns
+from data import normalize_yfinance_df
+from config import ATR_LENGTH, ATR_MULTIPLIER
 
 
 def _validate_ohlc(df):
@@ -502,7 +502,7 @@ def generate_report(ticker, df, market_data):
 
     # ── Interpretation ──
     try:
-        from screener_v2.adaptive.config import load_adaptive_config
+        from adaptive.config import load_adaptive_config
         adaptive_params = load_adaptive_config()
         full_df = calculate_full_indicators(df, custom_params=adaptive_params)
         last_full = full_df.iloc[-1]

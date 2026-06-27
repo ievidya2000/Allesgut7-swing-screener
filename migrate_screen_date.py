@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime
 
 DB_PATH = Path("performance_journal.db")
-PARQUET_PATH = Path("screener_v2/rl/training_data.parquet")
+PARQUET_PATH = Path(__file__).parent / "rl" / "training_data.parquet"
 
 
 def normalize_val(x):

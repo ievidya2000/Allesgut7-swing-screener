@@ -17,30 +17,30 @@ from datetime import datetime, timedelta
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from screener_v2.config import TICKERS, INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, SETUP_ORDER, SIGNAL_MAP, COLOR_MAP, MAX_DISPLAY, MC_HORIZON
-from screener_v2.data import get_all_market_data, get_jkse_data, get_fundamental_data
-from screener_v2.indicators import calculate_full_indicators
-from screener_v2.signals import determine_market_regime, determine_stock_regime, classify_setup_state
-from screener_v2.risk import calculate_tp_sl, simulate_tp_sl_probability
-from screener_v2.analysis import generate_deep_analysis
-from screener_v2.patterns import detect_patterns
-from screener_v2.deep_analysis import (
+from config import TICKERS, INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, SETUP_ORDER, SIGNAL_MAP, COLOR_MAP, MAX_DISPLAY, MC_HORIZON
+from data import get_all_market_data, get_jkse_data, get_fundamental_data
+from indicators import calculate_full_indicators
+from signals import determine_market_regime, determine_stock_regime, classify_setup_state
+from risk import calculate_tp_sl, simulate_tp_sl_probability
+from analysis import generate_deep_analysis
+from patterns import detect_patterns
+from deep_analysis import (
     multi_timeframe_analysis, volume_profile_analysis,
     trendline_analysis, risk_scenario_analysis, generate_interpretation
 )
 
 # Performance module
-from screener_v2.performance.journal import (
+from performance.journal import (
     init_db, get_journal_summary, get_all_predictions, get_trade_results,
     log_prediction, log_trade_result, update_prediction_status, clear_backtest_data
 )
-from screener_v2.adaptive.config import load_adaptive_config
-from screener_v2.performance.metrics import full_report, format_report, setup_breakdown, exit_reason_breakdown, sharpe_ratio, max_drawdown, win_rate
-from screener_v2.performance.calibration import calibration_analysis, brier_score, expected_calibration_error, maximum_calibration_error
-from screener_v2.performance.backtest import run_screening_at_date
-from screener_v2.rl.ranker import predict_rl_score
-from screener_v2.rl.auto_retrain import auto_retrain, get_retrain_status
-from screener_v2.utils.date_utils import normalize_screen_date, safe_screen_date_str
+from adaptive.config import load_adaptive_config
+from performance.metrics import full_report, format_report, setup_breakdown, exit_reason_breakdown, sharpe_ratio, max_drawdown, win_rate
+from performance.calibration import calibration_analysis, brier_score, expected_calibration_error, maximum_calibration_error
+from performance.backtest import run_screening_at_date
+from rl.ranker import predict_rl_score
+from rl.auto_retrain import auto_retrain, get_retrain_status
+from utils.date_utils import normalize_screen_date, safe_screen_date_str
 
 # ── Page config ──
 st.set_page_config(page_title="Swing Screener v2", layout="wide", initial_sidebar_state="expanded")

@@ -1,11 +1,11 @@
 import numpy as np
 import pandas as pd
 
-from screener_v2.config import (
+from config import (
     ATR_LENGTH, ATR_MULTIPLIER, SL_MULTIPLIER,
     RR1, RR2, RR3, FRESH_SIGNAL_BARS
 )
-from screener_v2.indicators import get_atr, get_supertrend
+from indicators import get_atr, get_supertrend
 
 
 def find_swing_points(df, window=10):

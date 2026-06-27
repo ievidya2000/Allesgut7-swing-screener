@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pandas as pd
 
-DB_PATH = Path(__file__).parent.parent.parent / "performance_journal.db"
+DB_PATH = Path(__file__).parent.parent / "performance_journal.db"
 
 _local = threading.local()
 

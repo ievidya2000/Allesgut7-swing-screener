@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from screener_v2.config import (
+from config import (
     ICHIMOKU_TENKAN, ICHIMOKU_KIJUN, ICHIMOKU_SENKOU_B,
     DONCHIAN_PERIOD, ATR_LENGTH, ATR_MULTIPLIER,
     ADX_LENGTH, AVWAP_LOOKBACK, VOLUME_MA_PERIOD,

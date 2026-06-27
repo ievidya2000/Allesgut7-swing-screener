@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 
-from screener_v2.rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
+from rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
 
 MODEL_DIR = Path(__file__).parent / "models"
 PRODUCTION_DIR = MODEL_DIR / "production"

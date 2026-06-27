@@ -23,9 +23,9 @@ from lightgbm import LGBMRegressor, LGBMClassifier
 
 import optuna
 
-from screener_v2.rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
-from screener_v2.rl.tabnet_config import TABNET_CONFIGS
-from screener_v2.utils.date_utils import normalize_screen_date
+from rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
+from rl.tabnet_config import TABNET_CONFIGS
+from utils.date_utils import normalize_screen_date
 
 warnings.filterwarnings("ignore", category=UserWarning)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -44,7 +44,7 @@ TABNET_PATH = MODEL_DIR / "tabnet_model.pkl"
 MIN_TRAIN_SAMPLES = 100
 
 
-def load_training_data(path="screener_v2/rl/training_data.parquet"):
+def load_training_data(path="rl/training_data.parquet"):
     df = pd.read_parquet(path)
     if "screen_date" in df.columns:
         df["screen_date"] = df["screen_date"].apply(normalize_screen_date)
@@ -612,7 +612,7 @@ def train_ranker(df, n_trials=15):
     with open(METRICS_PATH, "wb") as f:
         pickle.dump(metrics, f)
 
-    from screener_v2.rl.model_versioning import (
+    from rl.model_versioning import (
         should_replace_model, save_version, deploy_to_production, log_deployment
     )
 
