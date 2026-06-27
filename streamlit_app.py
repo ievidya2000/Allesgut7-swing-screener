@@ -45,6 +45,92 @@ from screener_v2.utils.date_utils import normalize_screen_date, safe_screen_date
 # ── Page config ──
 st.set_page_config(page_title="Swing Screener v2", layout="wide", initial_sidebar_state="expanded")
 
+# ── Load custom CSS ──
+@st.cache_resource
+def load_css():
+    css_path = Path(__file__).parent / ".streamlit" / "styles.css"
+    if css_path.exists():
+        with open(css_path) as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    else:
+        # Inline fallback CSS
+        st.markdown("""
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        [data-testid="stMetric"] {
+            background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 18px 22px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        [data-testid="stMetric"]:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+            border-color: rgba(66, 165, 245, 0.2);
+        }
+        [data-testid="stMetricValue"] {
+            font-family: 'Inter', monospace;
+            font-weight: 700;
+            font-size: 1.75rem;
+            letter-spacing: -0.5px;
+        }
+        [data-testid="stMetricLabel"] {
+            font-family: 'Inter', monospace;
+            font-weight: 500;
+            font-size: 0.8rem;
+            color: #78909C;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 6px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 12px;
+            padding: 6px;
+            border: 1px solid rgba(255,255,255,0.04);
+        }
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-family: 'Inter', monospace;
+            font-weight: 500;
+            font-size: 0.85rem;
+            color: #90A4AE;
+            transition: all 0.2s;
+            border: none;
+        }
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%) !important;
+            color: #FFFFFF !important;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(21, 101, 192, 0.3);
+        }
+        .stButton > button {
+            font-family: 'Inter', monospace;
+            font-weight: 600;
+            border-radius: 10px;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
+            border: none;
+            box-shadow: 0 4px 12px rgba(21, 101, 192, 0.35);
+        }
+        .stButton > button[kind="primary"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(21, 101, 192, 0.45);
+        }
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Inter', monospace !important;
+            letter-spacing: -0.3px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+load_css()
+
 # ── Constants ──
 TIMING_MAP = {
     "ENTRY_READY": ("🟢", "Ready to enter"),
@@ -193,9 +279,12 @@ def cached_run_screener(market_data_hash, market_regime):
             vol_ma_val = _safe_float(last.get("vol_ma"))
             vol_std_val = 1.0
 
+            di_spread_val = (plus_di_val - minus_di_val) / max(di_sum_val, 1)
+            score_val = 0  # Will be computed later
+
             rl_features = {
                 "setup": setup,
-                "score": 0,
+                "score": score_val,
                 "prob_tp1": _pf(prob.get("P_TP1")),
                 "prob_tp2": _pf(prob.get("P_TP2")),
                 "prob_tp3": _pf(prob.get("P_TP3")),
@@ -221,7 +310,7 @@ def cached_run_screener(market_data_hash, market_regime):
                 "price_to_donchian_upper": close / donchian_upper_val if donchian_upper_val > 0 else 1.0,
                 "vol_ma_ratio": _safe_float(last.get("vol_ma_ratio")),
                 "price_to_supertrend": (close - supertrend_line_val) / max(close, 1) * 100 if supertrend_line_val > 0 else 0,
-                "di_spread": (plus_di_val - minus_di_val) / max(di_sum_val, 1),
+                "di_spread": di_spread_val,
                 "atr_10_slope": _safe_float(last.get("atr_10_slope")),
                 "price_to_avwap": (close - avwap_val) / max(close, 1) * 100 if avwap_val > 0 else 0,
                 "tenkan_kijun_spread": (tenkan_val - kijun_val) / max(abs(kijun_val), 1) * 100,
@@ -230,6 +319,14 @@ def cached_run_screener(market_data_hash, market_regime):
                 "volume_zscore": 0,
                 "plus_di": plus_di_val,
                 "minus_di": minus_di_val,
+                # Interaction features
+                "di_spread_x_score": di_spread_val * score_val,
+                # Encoded features
+                "setup_encoded": SETUP_ENCODING.get(setup, 0),
+                "regime_encoded": REGIME_ENCODING.get(market_regime, 3.0),
+                # Temporal features
+                "day_of_week": datetime.now().weekday(),
+                "month": datetime.now().month,
             }
 
             results.append({
@@ -300,6 +397,43 @@ def cached_run_screener(market_data_hash, market_regime):
         low_score_mask = df_out["Score"] < 0.5
         df_out = df_out[~(bear_mask & low_score_mask)].reset_index(drop=True)
 
+        # Add fundamental data features
+        try:
+            fundamental_df = cached_fundamental()
+            fundamental_features = ['pe_ratio', 'forward_pe', 'pb_ratio', 'roe', 'revenue_growth',
+                                   'earnings_growth', 'dividend_yield', 'log_market_cap', 'ps_ratio', 'book_value']
+
+            for col in fundamental_features:
+                if col in fundamental_df.columns:
+                    df_out[col] = df_out['Ticker'].map(fundamental_df[col]).fillna(0)
+                else:
+                    df_out[col] = 0
+
+            # Update rl_features with fundamental data
+            for idx, row in df_out.iterrows():
+                if row.get('rl_features'):
+                    for col in fundamental_features:
+                        row['rl_features'][col] = row.get(col, 0)
+        except Exception:
+            # If fundamental data fails, add defaults
+            for col in ['pe_ratio', 'forward_pe', 'pb_ratio', 'roe', 'revenue_growth',
+                       'earnings_growth', 'dividend_yield', 'log_market_cap', 'ps_ratio', 'book_value']:
+                df_out[col] = 0
+
+        # Add rank features (relative to other screened stocks)
+        rank_features = ['pe_ratio', 'roe', 'log_market_cap', 'vol_ma_ratio']
+        for col in rank_features:
+            if col in df_out.columns and df_out[col].notna().any():
+                df_out[f'{col}_rank'] = df_out[col].rank(pct=True)
+            else:
+                df_out[f'{col}_rank'] = 0.5
+
+        # Update rl_features with rank features
+        for idx, row in df_out.iterrows():
+            if row.get('rl_features'):
+                for col in rank_features:
+                    row['rl_features'][f'{col}_rank'] = row.get(f'{col}_rank', 0.5)
+
         rl_scores = []
         profit_probs = []
         for _, row in df_out.iterrows():
@@ -323,16 +457,34 @@ def cached_run_screener(market_data_hash, market_regime):
 
 def render_sidebar():
     with st.sidebar:
-        st.title("⚡ Swing Screener")
-        st.caption("v2 — Multi-Setup Detection")
+        st.markdown("""
+        <div style="padding: 8px 0 16px;">
+            <h1 style="margin: 0; font-size: 1.6rem; background: linear-gradient(135deg, #42A5F5, #26A69A);
+                -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800;">
+                ⚡ Swing Screener
+            </h1>
+            <p style="color: #607D8B; margin: 4px 0 0 0; font-size: 0.8rem; font-weight: 500;">v2 — AI-Powered Detection</p>
+        </div>
+        """, unsafe_allow_html=True)
 
         # Market regime badge
         regime = st.session_state.get("market_regime")
         if regime:
             emoji = {"BULL": "🟢", "SIDEWAYS": "🟡", "BEAR": "🔴"}.get(regime, "⚪")
-            st.markdown(f"### {emoji} Market: {regime}")
+            color = {"BULL": "#66BB6A", "SIDEWAYS": "#FFA726", "BEAR": "#EF5350"}.get(regime, "#90A4AE")
+            st.markdown(f"""
+            <div style="background: {color}15; border: 1px solid {color}30; border-radius: 10px;
+                padding: 12px 16px; text-align: center; margin-bottom: 16px;">
+                <span style="color: {color}; font-weight: 600; font-size: 0.95rem;">{emoji} Market: {regime}</span>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.markdown("### ⚪ Market: --")
+            st.markdown("""
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;
+                padding: 12px 16px; text-align: center; margin-bottom: 16px;">
+                <span style="color: #90A4AE; font-weight: 500; font-size: 0.95rem;">⚪ Market: --</span>
+            </div>
+            """, unsafe_allow_html=True)
 
         # Run button
         if st.button("🚀 Run Screener", type="primary", use_container_width=True):
@@ -387,7 +539,12 @@ def render_sidebar():
             st.selectbox("Timing", timing_opts, key="filt_timing")
 
         st.divider()
-        st.caption("Built with Streamlit + yfinance")
+        st.markdown("""
+        <div style="text-align: center; padding: 8px 0;">
+            <p style="color: #455A64; font-size: 0.7rem; margin: 0;">Built with Streamlit + yfinance</p>
+            <p style="color: #37474F; font-size: 0.65rem; margin: 4px 0 0 0;">Swing Screener v2</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════
@@ -402,7 +559,23 @@ def render_dashboard():
 
     regime = st.session_state.get("market_regime", "N/A")
 
-    # Top row: metrics
+    # ── Header with market regime ──
+    regime_color = {"BULL": "#66BB6A", "SIDEWAYS": "#FFA726", "BEAR": "#EF5350"}.get(regime, "#90A4AE")
+    regime_emoji = {"BULL": "🟢", "SIDEWAYS": "🟡", "BEAR": "🔴"}.get(regime, "⚪")
+    st.markdown(f"""
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 1.5rem;">
+        <h2 style="margin: 0; color: #ECEFF1;">Dashboard</h2>
+        <span style="background: {regime_color}22; color: {regime_color}; padding: 6px 14px; border-radius: 8px;
+            font-weight: 600; font-size: 0.85rem; border: 1px solid {regime_color}44;">
+            {regime_emoji} Market: {regime}
+        </span>
+        <span style="color: #78909C; font-size: 0.9rem; margin-left: auto;">
+            {len(df)} setups detected
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Metrics row ──
     st.metric("Total Setups", len(df))
 
     row1_cols = st.columns(5)
@@ -415,20 +588,59 @@ def render_dashboard():
 
     st.divider()
 
-    # Chart
-    st.subheader("📊 Setup Distribution")
-    dist = df["Setup"].value_counts().reset_index()
-    dist.columns = ["Setup", "Count"]
-    fig = px.bar(dist, x="Setup", y="Count", color="Setup",
-                 color_discrete_map=COLOR_MAP, text="Count")
-    fig.update_layout(showlegend=False, height=300,
-                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      font_color="#E0E0E0")
-    st.plotly_chart(fig, use_container_width=True)
+    # ── Charts row ──
+    chart_col1, chart_col2 = st.columns([2, 1])
+
+    with chart_col1:
+        st.subheader("📊 Setup Distribution")
+        dist = df["Setup"].value_counts().reset_index()
+        dist.columns = ["Setup", "Count"]
+        fig = px.bar(dist, x="Setup", y="Count", color="Setup",
+                     color_discrete_map=COLOR_MAP, text="Count")
+        fig.update_layout(
+            showlegend=False, height=320,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#B0BEC5", font_family="Inter",
+            xaxis=dict(tickfont=dict(size=11)),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+            margin=dict(l=40, r=20, t=10, b=40),
+        )
+        fig.update_traces(textposition="outside", textfont=dict(size=11, color="#B0BEC5"))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with chart_col2:
+        st.subheader("🎯 Setup Mix")
+        setup_counts = df["Setup"].value_counts()
+        fig_pie = px.pie(
+            values=setup_counts.values, names=setup_counts.index,
+            color=setup_counts.index, color_discrete_map=COLOR_MAP,
+            hole=0.45,
+        )
+        fig_pie.update_traces(textinfo="percent", textfont=dict(size=10, color="#fff"))
+        fig_pie.update_layout(
+            height=320, showlegend=False,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#B0BEC5", font_family="Inter",
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
 
     st.divider()
 
-    # All Screening Results
+    # ── Timing Summary ──
+    if "Timing" in df.columns:
+        st.subheader("⏱️ Timing Overview")
+        timing_counts = df["Timing"].value_counts()
+        tcols = st.columns(min(len(timing_counts), 6))
+        for i, (timing, count) in enumerate(timing_counts.items()):
+            if i >= 6:
+                break
+            emoji = TIMING_MAP.get(timing, ("⚪", ""))[0]
+            tcols[i].metric(f"{emoji} {timing.replace('_', ' ').title()}", count)
+
+        st.divider()
+
+    # ── All Screening Results ──
     st.subheader(f"📋 All Screening Results ({len(df)} stocks)")
     display_cols = ["Ticker", "Setup", "Price", "Score", "RL Score", "Profit Prob", "Prob(TP1)", "Prob(SL)",
                     "Timing", "Entry Zone Low", "Entry Zone High", "Stop Loss"]
@@ -790,18 +1002,83 @@ def render_analysis():
         close = last['Close']
         atr = last['atr_rm']
 
-        # Overview
-        st.subheader(f"📊 {ticker}  ·  {setup if valid else 'NO SETUP'}  ·  Price {close:.2f}  ·  Regime {stock_regime}")
+        # ── Trade Assistant Header ──
+        setup_color = COLOR_MAP.get(setup, "#888") if valid else "#888"
+        regime_emoji = {"BULL": "🟢", "SIDEWAYS": "🟡", "BEAR": "🔴"}.get(stock_regime, "⚪")
+
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px; padding: 28px; margin-bottom: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <h2 style="margin: 0; color: #ECEFF1; font-size: 1.4rem;">Trade Assistant</h2>
+                <span style="background: {setup_color}22; color: {setup_color}; padding: 6px 14px; border-radius: 8px;
+                    font-weight: 600; font-size: 0.85rem; border: 1px solid {setup_color}44;">
+                    {setup if valid else 'NO SETUP'}
+                </span>
+                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
+                    font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
+                    📈 {ticker}
+                </span>
+                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
+                    font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
+                    💰 {close:.2f}
+                </span>
+                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
+                    font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
+                    {regime_emoji} {stock_regime}
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         if valid:
             da = generate_deep_analysis(full, setup, close, atr, adaptive_params)
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Entry Zone", f"{da['entry_zone']['low']} - {da['entry_zone']['high']}")
-            col2.metric("SL Normal / Wide", f"{da['sl_normal']} / {da['sl_wide']['price']}")
-            col3.metric("Timing", da['timing']['label'], da['timing']['detail'])
+            # ── Signal Assessment Cards ──
+            timing_data = da['timing']
+            timing_label = timing_data['label']
+            timing_emoji = TIMING_MAP.get(timing_label, ("⚪", ""))[0]
+            timing_color = "#66BB6A" if timing_label == "ENTRY_READY" else "#FFA726" if "WAIT" in timing_label else "#90A4AE"
 
-            # TP row
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Entry Zone</div>
+                    <div style="color: #ECEFF1; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{da['entry_zone']['low']:.0f} - {da['entry_zone']['high']:.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">{da['entry_zone']['strategy']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Stop Loss</div>
+                    <div style="color: #EF5350; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{da['sl_normal']:.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">Wide: {da['sl_wide']['price']:.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col3:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Timing</div>
+                    <div style="color: {timing_color}; font-size: 1.5rem; font-weight: 700;">{timing_emoji}</div>
+                    <div style="color: {timing_color}; font-size: 0.85rem; font-weight: 600; margin-top: 4px;">{timing_label.replace('_', ' ').title()}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col4:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Take Profit</div>
+                    <div style="color: #66BB6A; font-size: 1.1rem; font-weight: 700; font-family: 'Inter', monospace;">{da['tp_analysis'][0]['price']:.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">TP2: {da['tp_analysis'][1]['price']:.0f} | TP3: {da['tp_analysis'][2]['price']:.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # TP row with native metrics for delta info
             tp_cols = st.columns(3)
             for i, ta in enumerate(da['tp_analysis']):
                 tp_cols[i].metric(ta['label'], ta['price'], ta['note'])
@@ -816,22 +1093,43 @@ def render_analysis():
         jkse = cached_jkse()
         rs = risk_scenario_analysis(df_stock, jkse) if jkse is not None else {"beta": None, "scenarios": []}
 
-        # Interpretation
+        # ── Interpretation Section ──
         if valid:
             interp = generate_interpretation(full, setup, da, mta, vp, tl, rs, patterns, meta)
-            st.subheader("Interpretasi")
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 14px; padding: 24px; margin-bottom: 1.5rem; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <h3 style="color: #ECEFF1; margin: 0 0 16px 0; font-size: 1rem;">📊 Signal Assessment</h3>
+            """, unsafe_allow_html=True)
+
             for line in interp.split("\n"):
-                if line.startswith("TREND:") or line.startswith("VOLUME:") or line.startswith("PATTERN:") or line.startswith("RISK:") or line.startswith("ACTION:"):
-                    st.markdown(f"**{line}**")
+                if line.startswith("TREND:"):
+                    st.markdown(f"**📈 {line}**")
+                elif line.startswith("VOLUME:"):
+                    st.markdown(f"**📊 {line}**")
+                elif line.startswith("PATTERN:"):
+                    st.markdown(f"**🕯️ {line}**")
+                elif line.startswith("RISK:"):
+                    st.markdown(f"**⚠️ {line}**")
+                elif line.startswith("ACTION:"):
+                    # Color code the action
+                    if "Ready to enter" in line or "BUY" in line:
+                        st.markdown(f"**✅ {line}**")
+                    elif "Wait" in line:
+                        st.markdown(f"**⏳ {line}**")
+                    else:
+                        st.markdown(f"**{line}**")
                 elif line.startswith("  •"):
                     st.markdown(f"{line}")
                 elif line.strip():
                     st.markdown(line)
 
+            st.markdown("</div>", unsafe_allow_html=True)
+
         st.divider()
 
-        # Tabs for deep sections
-        tab_names = ["Chart", "Candlestick", "Multi-Timeframe", "Volume Profile", "Trendlines", "Risk Scenario"]
+        # ── Analysis Tabs ──
+        tab_names = ["📈 Chart", "🕯️ Candlestick", "📊 Multi-Timeframe", "📦 Volume Profile", "📐 Trendlines", "⚠️ Risk Scenario"]
         tabs = st.tabs(tab_names)
 
         with tabs[0]:
@@ -1278,8 +1576,28 @@ def _run_backtest(start_date, end_date, capital, pos_size, max_pos, freq, ticker
 
 def _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, capital):
     st.divider()
-    st.subheader("📈 Backtest Results")
 
+    # ── Results Header ──
+    total_ret = (equity_curve[-1] / capital - 1) * 100 if equity_curve else 0
+    ret_color = "#66BB6A" if total_ret > 0 else "#EF5350"
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px; padding: 28px; margin-bottom: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <h2 style="margin: 0; color: #ECEFF1; font-size: 1.4rem;">📈 Backtest Results</h2>
+            <span style="background: {ret_color}22; color: {ret_color}; padding: 6px 14px; border-radius: 8px;
+                font-weight: 600; font-size: 0.85rem; border: 1px solid {ret_color}44;">
+                Total Return: {total_ret:+.2f}%
+            </span>
+            <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
+                font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
+                {report.get('total_trades', 0)} trades
+            </span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Key Metrics ──
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Win Rate", f"{report.get('win_rate', 0):.1%}")
     col2.metric("Avg Return", f"{report.get('avg_return_pct', 0):+.2f}%")
@@ -1287,17 +1605,15 @@ def _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, 
     col4.metric("Max DD", f"{report.get('max_drawdown', 0):.2%}")
     col5.metric("Trades", f"{report.get('total_trades', 0)}")
 
-    st.divider()
-
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Profit Factor", f"{report.get('profit_factor', 0):.2f}")
     col2.metric("Sortino", f"{report.get('sortino_ratio', 0):.2f}")
-    total_ret = (equity_curve[-1] / capital - 1) * 100 if equity_curve else 0
     col3.metric("Total Return", f"{total_ret:+.2f}%")
     col4.metric("Calmar", f"{report.get('calmar_ratio', 0):.2f}")
 
     st.divider()
 
+    # ── Equity Curve ──
     st.subheader("📊 Equity Curve")
     eq_df = pd.DataFrame({
         "Date": snapshot_dates[:len(equity_curve)],
@@ -1308,21 +1624,27 @@ def _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, 
     fig.add_trace(go.Scatter(
         x=eq_df["Date"], y=eq_df["Portfolio (Rp Juta)"],
         mode="lines", name="Portfolio",
-        line=dict(color="#42A5F5", width=2),
+        line=dict(color="#42A5F5", width=2.5),
+        fill="tozeroy",
+        fillcolor="rgba(66, 165, 245, 0.1)",
     ))
     fig.update_layout(
-        height=350,
+        height=380,
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         yaxis_title="Value (Rp Juta)",
-        xaxis_title="Date",
-        margin=dict(l=50, r=20, t=30, b=40),
+        xaxis_title="",
+        font_color="#B0BEC5", font_family="Inter",
+        margin=dict(l=50, r=20, t=20, b=40),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
     )
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
+    # ── Setup Breakdown ──
     st.subheader("📊 Setup Breakdown")
     sb = report.get("setup_breakdown", {})
     if sb:
@@ -1338,15 +1660,18 @@ def _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, 
         )
         fig.update_traces(texttemplate="%{text:.1%}", textposition="outside")
         fig.update_layout(
-            height=300, showlegend=False,
+            height=320, showlegend=False,
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             yaxis_tickformat=".0%",
-            margin=dict(l=50, r=20, t=30, b=40),
+            font_color="#B0BEC5", font_family="Inter",
+            margin=dict(l=50, r=20, t=20, b=40),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    # ── Exit Reason Breakdown ──
     er = report.get("exit_reason_breakdown", {})
     if er:
         st.subheader("🚪 Exit Reason Breakdown")
@@ -1918,7 +2243,7 @@ def main():
     render_sidebar()
 
     if st.session_state.screening_done and st.session_state.screening_df is not None:
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📋 Results", "🔬 Deep Analysis", "📈 Performance"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📋 Results", "🎯 Trade Assistant", "📈 Performance"])
         with tab1:
             render_dashboard()
         with tab2:
@@ -1928,25 +2253,78 @@ def main():
         with tab4:
             render_performance()
     else:
-        st.title("⚡ Swing Screener v2")
-        st.markdown("---")
-        st.markdown("**9 setup types with deep analysis**")
+        # ── Professional Landing Page ──
         st.markdown("""
-        **Standard Setups:**
-        - **PRE_BREAKOUT** — Volatility contraction, near resistance, volume rising
-        - **BREAKOUT** — Fresh Donchian breakout with volume
-        - **ACCUMULATION** — Range-bound, volume on green days
-        - **EARLY_REVERSAL** — SuperTrend flip after downtrend
+        <div style="text-align: center; padding: 2rem 0 1rem;">
+            <h1 style="font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, #42A5F5 0%, #26A69A 50%, #66BB6A 100%);
+                -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -1px; margin-bottom: 0.5rem;">
+                ⚡ SWING SCREENER v2
+            </h1>
+            <p style="color: #78909C; font-size: 1.15rem; margin-bottom: 2.5rem; font-weight: 400;">
+                Professional IDX Stock Screening Tool with AI-Powered Ranking
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        **Advanced Setups:**
-        - **VCP** — Volatility Contraction Pattern (tight bases within bases)
-        - **TIGHT_BASE_BREAKOUT** — Tight base with inside bars, ready to break out
-        - **BASE_ON_BASE** — Multiple consolidation levels, breakout-ready
-        - **BULL_FLAG** — Bull flag pattern (flagpole + descending consolidation)
-        - **PULLBACK_MA20** — Pullback to 20-MA support in uptrend
-        """)
-        st.info("👈 Click **Run Screener** in the sidebar to start scanning.")
-        st.image("https://img.icons8.com/fluency/96/null/stock-exchange.png", width=96)
+        # Feature cards
+        fcol1, fcol2, fcol3 = st.columns(3)
+        with fcol1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 14px; padding: 28px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="font-size: 2.5rem; margin-bottom: 12px;">🎯</div>
+                <h3 style="color: #ECEFF1; margin: 0 0 8px 0; font-size: 1.1rem;">9 Setup Types</h3>
+                <p style="color: #78909C; margin: 0; font-size: 0.85rem;">PRE_BREAKOUT, VCP, TIGHT_BASE, BULL_FLAG, BREAKOUT & more</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with fcol2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 14px; padding: 28px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="font-size: 2.5rem; margin-bottom: 12px;">🤖</div>
+                <h3 style="color: #ECEFF1; margin: 0 0 8px 0; font-size: 1.1rem;">AI-Powered Ranking</h3>
+                <p style="color: #78909C; margin: 0; font-size: 0.85rem;">Reinforcement Learning scoring with Monte Carlo simulation</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with fcol3:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 14px; padding: 28px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="font-size: 2.5rem; margin-bottom: 12px;">📊</div>
+                <h3 style="color: #ECEFF1; margin: 0 0 8px 0; font-size: 1.1rem;">Deep Analysis</h3>
+                <p style="color: #78909C; margin: 0; font-size: 0.85rem;">Multi-TF, volume profile, trendlines, risk scenarios</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Setup types showcase
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px; padding: 32px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+            <h3 style="color: #ECEFF1; text-align: center; margin: 0 0 24px 0;">Setup Types</h3>
+            <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;">
+                <span style="background: #FFA726; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">PRE_BREAKOUT</span>
+                <span style="background: #AB47BC; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">VCP</span>
+                <span style="background: #26A69A; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">TIGHT_BASE_BREAKOUT</span>
+                <span style="background: #5C6BC0; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">BASE_ON_BASE</span>
+                <span style="background: #FF7043; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">BULL_FLAG</span>
+                <span style="background: #66BB6A; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">BREAKOUT</span>
+                <span style="background: #FFCA28; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">PULLBACK_MA20</span>
+                <span style="background: #42A5F5; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">ACCUMULATION</span>
+                <span style="background: #EF5350; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">EARLY_REVERSAL</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # CTA
+        st.markdown("""
+        <div style="text-align: center; padding: 1rem;">
+            <p style="color: #90A4AE; font-size: 0.95rem;">👈 Click <strong>Run Screener</strong> in the sidebar to start scanning IDX stocks</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
