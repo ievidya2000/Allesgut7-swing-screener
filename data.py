@@ -4,7 +4,7 @@ import yfinance as yf
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from config import (
+from screener_v2.config import (
     CACHE_DIR, CACHE_MAX_AGE_HOURS, BATCH_SIZE,
     DOWNLOAD_PERIOD, DOWNLOAD_INTERVAL, JKSE_TICKER
 )
@@ -315,7 +315,7 @@ def get_jkse_data(force_download=False, start=None, end=None):
 
 
 def get_fundamental_data(tickers, cache_dir=None):
-    """Fetch and cache fundamental data for all tickers."""
+    """Fetch and cache fundamental data for all tickers using parallel requests."""
     if cache_dir is None:
         cache_dir = CACHE_DIR
     else:
@@ -334,17 +334,15 @@ def get_fundamental_data(tickers, cache_dir=None):
             except Exception:
                 pass
 
-    print(f"  Fetching fundamental data for {len(tickers)} tickers...", flush=True)
+    print(f"  Fetching fundamental data for {len(tickers)} tickers (parallel)...", flush=True)
     fundamental_data = {}
     failed = []
 
-    for i, ticker in enumerate(tickers):
-        if (i + 1) % 50 == 0:
-            print(f"    {i+1}/{len(tickers)} fetched...", flush=True)
+    def fetch_single(ticker):
         try:
             t = yf.Ticker(ticker)
             info = t.info
-            fundamental_data[ticker] = {
+            return ticker, {
                 'pe_ratio': info.get('trailingPE'),
                 'forward_pe': info.get('forwardPE'),
                 'pb_ratio': info.get('priceToBook'),
@@ -357,8 +355,22 @@ def get_fundamental_data(tickers, cache_dir=None):
                 'book_value': info.get('bookValue'),
             }
         except Exception:
-            failed.append(ticker)
-        time.sleep(0.3)
+            return ticker, None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_single, t): t for t in tickers}
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+            if completed % 100 == 0:
+                print(f"    {completed}/{len(tickers)} fetched...", flush=True)
+            ticker, data = future.result()
+            if data is not None:
+                fundamental_data[ticker] = data
+            else:
+                failed.append(ticker)
 
     df = pd.DataFrame(fundamental_data).T
     df.index.name = 'ticker'

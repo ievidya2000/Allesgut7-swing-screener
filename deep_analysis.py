@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from indicators import (
+from screener_v2.indicators import (
     get_supertrend, get_ichimoku, rma, calculate_full_indicators
 )
-from signals import determine_stock_regime, classify_setup_state
-from analysis import generate_deep_analysis
-from patterns import detect_patterns
-from data import normalize_yfinance_df
-from config import ATR_LENGTH, ATR_MULTIPLIER
+from screener_v2.signals import determine_stock_regime, classify_setup_state
+from screener_v2.analysis import generate_deep_analysis
+from screener_v2.patterns import detect_patterns
+from screener_v2.data import normalize_yfinance_df
+from screener_v2.config import ATR_LENGTH, ATR_MULTIPLIER
 
 
 def _validate_ohlc(df):

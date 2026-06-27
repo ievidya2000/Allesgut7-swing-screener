@@ -3,7 +3,7 @@ import pandas as pd
 import warnings
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
-from config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
+from screener_v2.config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
 
 
 def calculate_tp_sl(close, atr, signal_type, custom_params=None):
@@ -65,7 +65,7 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
             model = MarkovRegression(
                 returns, k_regimes=2, trend='c', switching_variance=True
             )
-            res = model.fit(disp=False, maxiter=50)
+            res = model.fit(disp=False, maxiter=15)
 
             mu = np.empty(2)
             sigma = np.empty(2)
@@ -95,17 +95,23 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
         mu_val = returns.mean()
         sigma_val = returns.std()
 
+    # Vectorized Monte Carlo simulation
     if use_markov:
+        # Pre-generate all random numbers
         regime_returns = np.empty((n_sim, horizon))
         regime_rands = np.random.random((n_sim, horizon))
         init_rands = np.random.random(n_sim)
 
-        for i in range(n_sim):
-            regime = 0 if init_rands[i] < 0.5 else 1
-            for t in range(horizon):
-                regime_returns[i, t] = np.random.normal(mu[regime], sigma[regime])
-                trans = transition_matrix[regime]
-                regime = 0 if regime_rands[i, t] < trans[0] else 1
+        # Vectorized regime initialization
+        regimes = (init_rands >= 0.5).astype(int)
+
+        # Vectorized simulation per time step
+        for t in range(horizon):
+            # Generate returns for current regime
+            regime_returns[:, t] = np.random.normal(mu[regimes], sigma[regimes])
+            # Vectorized regime transition
+            trans_probs = transition_matrix[regimes, 0]
+            regimes = (regime_rands[:, t] >= trans_probs).astype(int)
 
         cum_returns = np.cumsum(regime_returns, axis=1)
     else:

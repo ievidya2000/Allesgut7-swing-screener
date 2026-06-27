@@ -3,9 +3,9 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-from performance.journal import _get_conn, init_db
-from rl.extract_features import extract_training_data
-from rl.train_ranker import train_ranker
+from screener_v2.performance.journal import _get_conn, init_db
+from screener_v2.rl.extract_features import extract_training_data
+from screener_v2.rl.train_ranker import train_ranker
 
 MODEL_DIR = Path(__file__).parent / "models"
 MODEL_BACKUP_DIR = MODEL_DIR / "backup"

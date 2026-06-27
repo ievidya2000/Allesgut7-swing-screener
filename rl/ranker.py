@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 
-from rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
+from screener_v2.rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
 
 MODEL_DIR = Path(__file__).parent / "models"
 PRODUCTION_DIR = MODEL_DIR / "production"
@@ -175,4 +175,92 @@ def predict_rl_score(result):
 
 
 def predict_rl_scores_batch(results):
-    return [predict_rl_score(r) for r in results]
+    """Batch RL scoring - much faster than calling predict_rl_score per ticker."""
+    if not _load_models():
+        return [(None, None)] * len(results)
+
+    feature_cols = _model_features if _model_features else FEATURE_COLUMNS
+    rows = []
+
+    for result in results:
+        features = result.get("rl_features", result)
+        if not features:
+            rows.append([0.0] * len(feature_cols))
+            continue
+
+        row = []
+        for col in feature_cols:
+            val = features.get(col, 0)
+            if col in CATEGORICAL_COLUMNS:
+                le = _encoders.get(col)
+                if le:
+                    val_str = str(val)
+                    mapping = le.get("mapping", {})
+                    val = mapping.get(val_str, 0)
+                else:
+                    val = 0
+
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                val = 0.0
+            row.append(float(val))
+        rows.append(row)
+
+    try:
+        import pandas as pd
+        X_df = pd.DataFrame(rows, columns=feature_cols)
+        X_df = X_df.replace([np.inf, -np.inf], 0).fillna(0)
+
+        if _dropped_features:
+            X_df = X_df.drop(columns=[c for c in _dropped_features if c in X_df.columns], errors='ignore')
+
+        rl_scores = _ranker.predict(X_df)
+
+        if _ensemble is not None and _scaler is not None:
+            gbm_probs = _classifier.predict_proba(X_df)[:, 1]
+
+            xgb = _ensemble.get("xgb")
+            lgbm = _ensemble.get("lgbm")
+            rf = _ensemble.get("rf")
+            lr = _ensemble.get("lr")
+            tabnet = _ensemble.get("tabnet")
+            scaler = _ensemble.get("scaler", _scaler)
+            weights = _ensemble.get("weights", [0.05, 0.10, 0.10, 0.60, 0.15])
+            use_tabnet = _ensemble.get("use_tabnet", False)
+
+            xgb_probs = xgb.predict_proba(X_df)[:, 1] if xgb is not None else np.zeros(len(results))
+            lgbm_probs = lgbm.predict_proba(X_df)[:, 1] if lgbm is not None else np.zeros(len(results))
+            rf_probs = rf.predict_proba(X_df)[:, 1] if rf is not None else np.zeros(len(results))
+
+            X_lr = pd.DataFrame(scaler.transform(X_df), columns=X_df.columns)
+            lr_probs = lr.predict_proba(X_lr)[:, 1] if lr is not None else np.zeros(len(results))
+
+            if use_tabnet and tabnet is not None:
+                X_np = X_df.values.astype(np.float32)
+                tabnet_probs = tabnet.predict_proba(X_np)[:, 1]
+                profit_probs = (
+                    weights[0] * gbm_probs +
+                    weights[1] * xgb_probs +
+                    weights[2] * lgbm_probs +
+                    weights[3] * rf_probs +
+                    weights[4] * lr_probs +
+                    weights[5] * tabnet_probs
+                )
+            else:
+                profit_probs = (
+                    weights[0] * gbm_probs +
+                    weights[1] * xgb_probs +
+                    weights[2] * lgbm_probs +
+                    weights[3] * rf_probs +
+                    weights[4] * lr_probs
+                )
+        else:
+            profit_probs = _classifier.predict_proba(X_df)[:, 1]
+
+        # Normalize scores
+        results_list = []
+        for i in range(len(results)):
+            rl_score_normalized = max(0, min(100, float(rl_scores[i]) * 5 + 50))
+            results_list.append((rl_score_normalized, float(profit_probs[i])))
+        return results_list
+    except Exception:
+        return [(None, None)] * len(results)

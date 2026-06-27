@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from collections import defaultdict
 
-from performance.journal import init_db, get_trade_results, get_all_predictions
+from screener_v2.performance.journal import init_db, get_trade_results, get_all_predictions
 
 
 def parse_probability(prob_str):

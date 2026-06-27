@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from config import ADX_THRESHOLD, FRESH_SIGNAL_BARS
-from indicators import (
+from screener_v2.config import ADX_THRESHOLD, FRESH_SIGNAL_BARS
+from screener_v2.indicators import (
     get_ichimoku, get_supertrend, get_adx, rma
 )
 

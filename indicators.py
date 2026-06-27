@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from config import (
+from screener_v2.config import (
     ICHIMOKU_TENKAN, ICHIMOKU_KIJUN, ICHIMOKU_SENKOU_B,
     DONCHIAN_PERIOD, ATR_LENGTH, ATR_MULTIPLIER,
     ADX_LENGTH, AVWAP_LOOKBACK, VOLUME_MA_PERIOD,
@@ -12,12 +12,10 @@ from config import (
 
 
 def rma(series, length):
-    rma = np.zeros(len(series))
-    rma[:] = np.nan
-    rma[length - 1] = series.iloc[:length].mean()
-    for i in range(length, len(series)):
-        rma[i] = (rma[i - 1] * (length - 1) + series.iloc[i]) / length
-    return pd.Series(rma, index=series.index)
+    """Vectorized RMA using pandas ewm (exponential weighted moving average)."""
+    # RMA is equivalent to EMA with alpha = 1/length
+    # pandas ewm with adjust=False matches the RMA formula exactly
+    return series.ewm(alpha=1.0/length, adjust=False, min_periods=length).mean()
 
 
 def get_atr(high, low, close, period):
@@ -62,10 +60,9 @@ def get_supertrend(high, low, close, period, multiplier):
     upper_band = hl2 + multiplier * atr
     lower_band = hl2 - multiplier * atr
 
-    supertrend = np.zeros(len(close))
-    direction = np.zeros(len(close))
-    supertrend[:] = np.nan
-    direction[:] = 1
+    n = len(close)
+    supertrend = np.full(n, np.nan)
+    direction = np.ones(n)
 
     first_valid = atr.first_valid_index()
     if first_valid is None:
@@ -75,21 +72,26 @@ def get_supertrend(high, low, close, period, multiplier):
     supertrend[idx] = lower_band.iloc[idx]
     direction[idx] = 1
 
-    for i in range(idx + 1, len(close)):
+    # Convert to numpy arrays for faster access
+    close_arr = close.values
+    upper_arr = upper_band.values
+    lower_arr = lower_band.values
+
+    for i in range(idx + 1, n):
         prev_st = supertrend[i - 1]
         prev_dir = direction[i - 1]
 
-        if close.iloc[i] > prev_st:
+        if close_arr[i] > prev_st:
             direction[i] = 1
-        elif close.iloc[i] < prev_st:
+        elif close_arr[i] < prev_st:
             direction[i] = -1
         else:
             direction[i] = prev_dir
 
         if direction[i] == 1:
-            supertrend[i] = max(lower_band.iloc[i], prev_st)
+            supertrend[i] = max(lower_arr[i], prev_st)
         else:
-            supertrend[i] = min(upper_band.iloc[i], prev_st)
+            supertrend[i] = min(upper_arr[i], prev_st)
 
     return (pd.Series(supertrend, index=close.index),
             pd.Series(direction, index=close.index))
@@ -160,19 +162,16 @@ def get_avwap(high, low, close, volume, supertrend_bullish, lookback=AVWAP_LOOKB
     tp = (high + low + close) / 3
     tp_vol = (tp * volume).values
 
-    anchor_mask = np.zeros(n, dtype=bool)
-    anchor_idx_arr = np.full(n, -1, dtype=int)
-
+    # Vectorized anchor detection
     bull_vals = supertrend_bullish.values if hasattr(supertrend_bullish, 'values') else np.array(supertrend_bullish)
     pivot_low_vals = pivot_low_detected.values if hasattr(pivot_low_detected, 'values') else np.array(pivot_low_detected)
     pivot_high_vals = pivot_high_detected.values if hasattr(pivot_high_detected, 'values') else np.array(pivot_high_detected)
 
-    for i in range(1, n):
-        if bull_vals[i] and pivot_low_vals[i]:
-            anchor_idx_arr[i] = max(0, i - lookback)
-        elif not bull_vals[i] and pivot_high_vals[i]:
-            anchor_idx_arr[i] = max(0, i - lookback)
+    # Determine anchor indices
+    anchor_mask = (bull_vals & pivot_low_vals) | (~bull_vals & pivot_high_vals)
+    anchor_indices = np.where(anchor_mask, np.maximum(0, np.arange(n) - lookback), -1)
 
+    # Forward-fill anchor indices
     active_anchor = -1
     cum_tp_vol = 0.0
     cum_vol = 0.0
@@ -180,8 +179,8 @@ def get_avwap(high, low, close, volume, supertrend_bullish, lookback=AVWAP_LOOKB
     vol_vals = volume.values
 
     for i in range(n):
-        if anchor_idx_arr[i] != -1:
-            active_anchor = anchor_idx_arr[i]
+        if anchor_indices[i] != -1:
+            active_anchor = anchor_indices[i]
             cum_tp_vol = tp_vol[active_anchor]
             cum_vol = vol_vals[active_anchor]
         elif active_anchor != -1 and i > active_anchor:
@@ -190,8 +189,6 @@ def get_avwap(high, low, close, volume, supertrend_bullish, lookback=AVWAP_LOOKB
 
         if active_anchor != -1 and i >= active_anchor and cum_vol > 0:
             avwap[i] = cum_tp_vol / cum_vol
-        else:
-            avwap[i] = np.nan
 
     return pd.Series(avwap, index=close.index)
 

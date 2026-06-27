@@ -38,7 +38,6 @@ from adaptive.config import load_adaptive_config
 from performance.metrics import full_report, format_report, setup_breakdown, exit_reason_breakdown, sharpe_ratio, max_drawdown, win_rate
 from performance.calibration import calibration_analysis, brier_score, expected_calibration_error, maximum_calibration_error
 from performance.backtest import run_screening_at_date
-from rl.ranker import predict_rl_score
 from rl.auto_retrain import auto_retrain, get_retrain_status
 from utils.date_utils import normalize_screen_date, safe_screen_date_str
 
@@ -191,11 +190,21 @@ def cached_run_screener(market_data_hash, market_regime):
     results = []
     skipped = {"short_data": 0, "no_setup": 0, "error": 0}
     adaptive_params = load_adaptive_config()
+    markov_cache = {}
 
     progress_data = list(st.session_state.get("market_data", {}).items())
     total = len(progress_data)
 
+    import time as _time
+    start_time = _time.time()
+
     for idx, (ticker, df) in enumerate(progress_data):
+        if (idx + 1) % 100 == 0:
+            elapsed = _time.time() - start_time
+            rate = (idx + 1) / elapsed if elapsed > 0 else 0
+            eta = (total - idx - 1) / rate if rate > 0 else 0
+            print(f"  Screening: {idx+1}/{total} tickers ({elapsed:.1f}s elapsed, ETA {eta:.0f}s)", flush=True)
+
         try:
             if len(df) < 100:
                 skipped["short_data"] += 1
@@ -237,7 +246,8 @@ def cached_run_screener(market_data_hash, market_regime):
             analysis = generate_deep_analysis(full, setup, close, atr, adaptive_params)
             entry_zone = analysis["entry_zone"]
 
-            prob = simulate_tp_sl_probability(df, close, analysis["sl_normal"], analysis["tp1"], analysis["tp2"], analysis["tp3"])
+            prob = simulate_tp_sl_probability(df, close, analysis["sl_normal"], analysis["tp1"], analysis["tp2"], analysis["tp3"],
+                                               markov_cache=markov_cache, markov_cache_key=ticker)
             if prob is None:
                 prob = {"P_TP1": None, "P_TP2": None, "P_TP3": None, "P_SL": None,
                         "AVG_DAYS_TP1": None, "AVG_DAYS_TP2": None, "AVG_DAYS_TP3": None}
@@ -436,11 +446,17 @@ def cached_run_screener(market_data_hash, market_regime):
 
         rl_scores = []
         profit_probs = []
+        # Batch RL scoring
+        rl_inputs = []
         for _, row in df_out.iterrows():
             rl_feat = row.get("rl_features", None)
             if rl_feat is None or (isinstance(rl_feat, float) and pd.isna(rl_feat)):
                 rl_feat = row.to_dict()
-            rl_s, p_prob = predict_rl_score(rl_feat)
+            rl_inputs.append(rl_feat)
+
+        from rl.ranker import predict_rl_scores_batch
+        batch_results = predict_rl_scores_batch(rl_inputs)
+        for rl_s, p_prob in batch_results:
             rl_scores.append(rl_s)
             profit_probs.append(p_prob * 100 if p_prob is not None else p_prob)
         df_out["RL Score"] = rl_scores

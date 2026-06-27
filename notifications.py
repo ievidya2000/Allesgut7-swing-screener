@@ -9,7 +9,7 @@ from email.mime.application import MIMEApplication
 from email import encoders
 from pathlib import Path
 
-from config_email import load_email_config, is_email_configured
+from screener_v2.config_email import load_email_config, is_email_configured
 
 logger = logging.getLogger("notifications")
 
