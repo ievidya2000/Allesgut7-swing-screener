@@ -203,9 +203,16 @@ def send_daily_summary_email(summary, report_text, attachments=None):
                 </div>
             </div>
 
-            <div class="footer">
-                <p>Swing Screener v2 - Automated Daily Report</p>
-                <p>Full report attached as CSV</p>
+            <div class="footer" style="background: linear-gradient(135deg, #FF6B35 0%, #FF4444 100%); padding: 15px; border-radius: 8px; text-align: center;">
+                <p style="color: white; font-weight: bold; font-size: 14px; margin: 0;">
+                    ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+                </p>
+                <p style="color: #ddd; font-size: 12px; margin: 8px 0 0 0;">
+                    Swing Screener v2 - Automated Daily Report
+                </p>
+                <p style="color: #ddd; font-size: 12px; margin: 4px 0 0 0;">
+                    Full report attached as CSV
+                </p>
             </div>
         </div>
     </body>

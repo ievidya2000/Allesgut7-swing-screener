@@ -400,3 +400,30 @@ h3 { font-weight: 600; }
         font-size: 2rem !important;
     }
 }
+
+/* ── DYOR Disclaimer Banner ────────────────────────── */
+.dyor-disclaimer {
+    background: linear-gradient(135deg, #FF6B35 0%, #FF4444 100%);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-weight: 700;
+    text-align: center;
+    margin: 15px 0;
+    box-shadow: 0 4px 12px rgba(255, 68, 68, 0.3);
+    font-size: 0.95rem;
+    letter-spacing: 0.5px;
+}
+
+.dyor-disclaimer-small {
+    background: linear-gradient(135deg, #FF6B35 0%, #FF4444 100%);
+    color: white;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-align: center;
+    margin: 8px 0;
+    box-shadow: 0 2px 8px rgba(255, 68, 68, 0.2);
+    font-size: 0.75rem;
+    letter-spacing: 0.3px;
+}

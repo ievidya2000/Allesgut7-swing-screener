@@ -177,6 +177,8 @@ def print_performance_summary():
     print(f"  ├─ Open           : {summary['open_trades']}")
     print(f"  └─ Closed         : {summary['closed_trades']}")
     print(f"  {'─'*40}")
+    print(f"  ⚠️  Think First. Trade Second. DYOR - Do Your Own Research")
+    print(f"  {'─'*40}")
 
     if (summary["closed_trades"] or 0) > 0:
         from screener_v2.performance.journal import get_trade_results

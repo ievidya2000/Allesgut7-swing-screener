@@ -520,11 +520,15 @@ def generate_report(ticker, df, market_data):
             lines.append(f"└{'─' * IW}┘")
         else:
             lines.append(f"┌─ INTERPRETASI {_pad_inner('', IW - 16)}┐")
-            lines.append(f"│{_pad_inner('  Tidak ada setup aktif untuk interpretasi', IW)}│")
-            lines.append(f"└{'─' * IW}┘")
+        lines.append(f"│{_pad_inner('  Tidak ada setup aktif untuk interpretasi', IW)}│")
+        lines.append(f"└{'─' * IW}┘")
     except Exception as e:
         lines.append(f"┌─ INTERPRETASI {_pad_inner('', IW - 16)}┐")
         lines.append(f"│{_pad_inner(f'  Error: {e}', IW)}│")
         lines.append(f"└{'─' * IW}┘")
+
+    lines.append(f"┌{'─' * IW}┐")
+    lines.append(f"│{_pad_inner('⚠️  Think First. Trade Second. DYOR - Do Your Own Research', IW)}│")
+    lines.append(f"└{'─' * IW}┘")
 
     return "\n".join(lines)

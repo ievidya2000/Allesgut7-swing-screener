@@ -138,6 +138,8 @@ def format_daily_summary(summary):
 
     lines.append("")
     lines.append("=" * 60)
+    lines.append("  ⚠️  Think First. Trade Second. DYOR - Do Your Own Research")
+    lines.append("=" * 60)
 
     return "\n".join(lines)
 

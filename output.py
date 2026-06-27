@@ -65,6 +65,8 @@ def print_banner():
     print(sep("="))
     print("  SWING SCREENER v2 — Deep Analysis")
     print(sep("="))
+    print("  ⚠️  Think First. Trade Second. DYOR - Do Your Own Research")
+    print(sep("="))
 
 
 def print_summary(market_regime, total_scanned, total_setups, skipped):
@@ -73,5 +75,7 @@ def print_summary(market_regime, total_scanned, total_setups, skipped):
     print(f"  Stocks Scanned       : {total_scanned}")
     print(f"  Setups Found         : {total_setups}")
     print(f"  Skipped              : {skipped}")
+    print(sep("="))
+    print("  ⚠️  Think First. Trade Second. DYOR - Do Your Own Research")
     print(sep("="))
     print()

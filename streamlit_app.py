@@ -557,6 +557,9 @@ def render_sidebar():
         st.divider()
         st.markdown("""
         <div style="text-align: center; padding: 8px 0;">
+            <div class="dyor-disclaimer-small">
+                ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+            </div>
             <p style="color: #455A64; font-size: 0.7rem; margin: 0;">Built with Streamlit + yfinance</p>
             <p style="color: #37474F; font-size: 0.65rem; margin: 4px 0 0 0;">Swing Screener v2</p>
         </div>
@@ -1741,6 +1744,13 @@ def _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, 
         csv = trades_df.to_csv(index=False).encode("utf-8")
         st.download_button("📥 Download Trade Log", csv, "backtest_trades.csv", "text/csv")
 
+    # DYOR Disclaimer
+    st.markdown("""
+    <div class="dyor-disclaimer">
+        ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+    </div>
+    """, unsafe_allow_html=True)
+
 
 def render_calibration():
     st.subheader("🎯 Monte Carlo Calibration")
@@ -1850,6 +1860,13 @@ def render_calibration():
         for k, v in bins_result.items()
     ])
     st.dataframe(bins_df, use_container_width=True, hide_index=True)
+
+    # DYOR Disclaimer
+    st.markdown("""
+    <div class="dyor-disclaimer">
+        ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_portfolio():
@@ -2145,6 +2162,13 @@ def _display_portfolio_results(report, equity_curve, snapshot_dates, trades_log,
         csv = trades_df.to_csv(index=False).encode("utf-8")
         st.download_button("📥 Download Trade Log", csv, "portfolio_trades.csv", "text/csv")
 
+    # DYOR Disclaimer
+    st.markdown("""
+    <div class="dyor-disclaimer">
+        ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+    </div>
+    """, unsafe_allow_html=True)
+
 
 def render_journal():
     st.subheader("📋 Performance Journal")
@@ -2250,6 +2274,13 @@ def render_journal():
         else:
             st.info("No trade results found.")
 
+    # DYOR Disclaimer
+    st.markdown("""
+    <div class="dyor-disclaimer">
+        ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+    </div>
+    """, unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════
 # MAIN
@@ -2330,6 +2361,13 @@ def main():
                 <span style="background: #42A5F5; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">ACCUMULATION</span>
                 <span style="background: #EF5350; color: #000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">EARLY_REVERSAL</span>
             </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # DYOR Disclaimer
+        st.markdown("""
+        <div class="dyor-disclaimer">
+            ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
         </div>
         """, unsafe_allow_html=True)
 
