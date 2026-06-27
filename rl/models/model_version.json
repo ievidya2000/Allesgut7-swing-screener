@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "auc": 0.8028,
+  "features": 37,
+  "threshold": 0.9,
+  "timestamp": "2026-06-27T08:10:19.975126",
+  "path": "/home/chalderaaa/swing-screener/screener_v2/rl/models/versions/v1"
+}

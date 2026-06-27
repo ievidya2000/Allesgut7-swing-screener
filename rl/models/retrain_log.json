@@ -1,0 +1,6 @@
+{
+  "last_retrain_trades": 6,
+  "last_retrain_time": "2026-06-25T13:17:22.802063",
+  "deployed": true,
+  "reason": "AUC improved: 0.420 \u2192 0.500; Accuracy improved: 0.426 \u2192 0.500"
+}

@@ -1,0 +1,119 @@
+[
+  {
+    "timestamp": "2026-06-21T22:47:24.715179",
+    "config": {
+      "supertrend_atr_length": 10,
+      "supertrend_multiplier": 3.5,
+      "adx_length": 14,
+      "adx_threshold": 25,
+      "rr1": 1.5,
+      "rr2": 2.5,
+      "rr3": 3.0,
+      "sl_multiplier": 1.2,
+      "donchian_period": 20,
+      "volume_ma_period": 20,
+      "ichimoku_tenkan": 9,
+      "ichimoku_kijun": 26,
+      "ichimoku_senkou_b": 52,
+      "vol_contraction_threshold": 0.8,
+      "fresh_signal_bars": 3,
+      "score_w_prob_tp": 1.0,
+      "score_w_profit_pct": 0.5,
+      "score_w_prob_sl": -1.0,
+      "score_w_avg_days": -0.3
+    },
+    "metrics": {
+      "sharpe": 4.3273,
+      "stability": {
+        "supertrend_multiplier": {
+          "mean": 3.2143,
+          "std": 0.4518,
+          "stability": 0.8595,
+          "values": [
+            3.5,
+            3.5,
+            2.5,
+            2.5,
+            3.5,
+            3.5,
+            3.5
+          ]
+        },
+        "adx_threshold": {
+          "mean": 25.0,
+          "std": 2.2678,
+          "stability": 0.9093,
+          "values": [
+            22,
+            25,
+            22,
+            28,
+            28,
+            25,
+            25
+          ]
+        },
+        "rr1": {
+          "mean": 2.2143,
+          "std": 0.3642,
+          "stability": 0.8355,
+          "values": [
+            2.0,
+            1.5,
+            2.0,
+            2.5,
+            2.5,
+            2.5,
+            2.5
+          ]
+        },
+        "sl_multiplier": {
+          "mean": 1.5429,
+          "std": 0.3959,
+          "stability": 0.7434,
+          "values": [
+            2.0,
+            1.2,
+            2.0,
+            2.0,
+            1.2,
+            1.2,
+            1.2
+          ]
+        },
+        "donchian_period": {
+          "mean": 21.4286,
+          "std": 2.2588,
+          "stability": 0.8946,
+          "values": [
+            20,
+            20,
+            20,
+            20,
+            20,
+            25,
+            25
+          ]
+        },
+        "volume_ma_period": {
+          "mean": 20.7143,
+          "std": 4.165,
+          "stability": 0.7989,
+          "values": [
+            20,
+            20,
+            15,
+            15,
+            25,
+            25,
+            25
+          ]
+        }
+      }
+    },
+    "window": {
+      "start": "2025-06-19 06:51:11.504579",
+      "end": "2026-06-19 06:51:11.504579"
+    }
+  }
+]

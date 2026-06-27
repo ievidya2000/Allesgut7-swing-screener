@@ -1,0 +1,31 @@
+# Credentials
+email_config.json
+.streamlit/secrets.toml
+
+# Database
+*.db
+
+# Cache
+cache_yfinance/
+
+# Logs
+logs/
+debug.log
+*.log
+
+# Output CSVs
+hasil_screener*.csv
+swing_plan_*.csv
+calibration_plot.png
+equity_curve.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/

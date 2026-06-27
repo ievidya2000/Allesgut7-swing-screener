@@ -1,0 +1,9 @@
+{
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "smtp_username": "your-email@gmail.com",
+  "smtp_password": "xxxx-xxxx-xxxx-xxxx", sdbl icwm ftdc nktr
+  "from_email": "your-email@gmail.com",
+  "to_email": "recipient@example.com",
+  "use_tls": true
+}

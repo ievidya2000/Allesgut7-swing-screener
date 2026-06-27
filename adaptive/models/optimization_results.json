@@ -1,0 +1,198 @@
+{
+  "timestamp": "2026-06-21T22:45:27.861424",
+  "best_config": {
+    "supertrend_atr_length": 10,
+    "supertrend_multiplier": 3.5,
+    "adx_length": 14,
+    "adx_threshold": 25,
+    "rr1": 2.5,
+    "rr2": 2.5,
+    "rr3": 3.0,
+    "sl_multiplier": 1.2,
+    "donchian_period": 25,
+    "volume_ma_period": 25,
+    "ichimoku_tenkan": 9,
+    "ichimoku_kijun": 26,
+    "ichimoku_senkou_b": 52,
+    "vol_contraction_threshold": 0.8,
+    "fresh_signal_bars": 3,
+    "score_w_prob_tp": 1.0,
+    "score_w_profit_pct": 0.5,
+    "score_w_prob_sl": -1.0,
+    "score_w_avg_days": -0.3
+  },
+  "best_sharpe": 0.2336,
+  "top_10": [
+    {
+      "sharpe": 0.2336,
+      "win_rate": 0.2407,
+      "profit_factor": 0.8787,
+      "total_return": 0.0401,
+      "max_drawdown": 0.218,
+      "num_trades": 241,
+      "params": {
+        "supertrend_multiplier": 3.5,
+        "adx_threshold": 25,
+        "rr1": 2.5,
+        "sl_multiplier": 1.2,
+        "donchian_period": 25,
+        "volume_ma_period": 25
+      },
+      "combo_index": 16
+    },
+    {
+      "sharpe": -0.024,
+      "win_rate": 0.2317,
+      "profit_factor": 0.7806,
+      "total_return": 0.005,
+      "max_drawdown": 0.2103,
+      "num_trades": 246,
+      "params": {
+        "supertrend_multiplier": 3.0,
+        "adx_threshold": 25,
+        "rr1": 2.5,
+        "sl_multiplier": 1.2,
+        "donchian_period": 25,
+        "volume_ma_period": 15
+      },
+      "combo_index": 39
+    },
+    {
+      "sharpe": -0.0519,
+      "win_rate": 0.2828,
+      "profit_factor": 0.7641,
+      "total_return": 0.0054,
+      "max_drawdown": 0.1984,
+      "num_trades": 145,
+      "params": {
+        "supertrend_multiplier": 3.0,
+        "adx_threshold": 22,
+        "rr1": 2.5,
+        "sl_multiplier": 2.0,
+        "donchian_period": 20,
+        "volume_ma_period": 25
+      },
+      "combo_index": 95
+    },
+    {
+      "sharpe": -0.0522,
+      "win_rate": 0.2448,
+      "profit_factor": 0.6544,
+      "total_return": 0.0064,
+      "max_drawdown": 0.1523,
+      "num_trades": 143,
+      "params": {
+        "supertrend_multiplier": 3.0,
+        "adx_threshold": 20,
+        "rr1": 2.5,
+        "sl_multiplier": 2.0,
+        "donchian_period": 25,
+        "volume_ma_period": 20
+      },
+      "combo_index": 12
+    },
+    {
+      "sharpe": -0.087,
+      "win_rate": 0.2449,
+      "profit_factor": 0.7249,
+      "total_return": 0.0021,
+      "max_drawdown": 0.1775,
+      "num_trades": 147,
+      "params": {
+        "supertrend_multiplier": 3.0,
+        "adx_threshold": 28,
+        "rr1": 1.5,
+        "sl_multiplier": 2.0,
+        "donchian_period": 15,
+        "volume_ma_period": 15
+      },
+      "combo_index": 19
+    },
+    {
+      "sharpe": -0.1044,
+      "win_rate": 0.2569,
+      "profit_factor": 0.775,
+      "total_return": -0.001,
+      "max_drawdown": 0.1812,
+      "num_trades": 144,
+      "params": {
+        "supertrend_multiplier": 3.0,
+        "adx_threshold": 20,
+        "rr1": 2.0,
+        "sl_multiplier": 2.0,
+        "donchian_period": 15,
+        "volume_ma_period": 15
+      },
+      "combo_index": 40
+    },
+    {
+      "sharpe": -0.1611,
+      "win_rate": 0.2422,
+      "profit_factor": 0.8074,
+      "total_return": -0.0101,
+      "max_drawdown": 0.1865,
+      "num_trades": 223,
+      "params": {
+        "supertrend_multiplier": 4.0,
+        "adx_threshold": 22,
+        "rr1": 2.5,
+        "sl_multiplier": 1.2,
+        "donchian_period": 25,
+        "volume_ma_period": 15
+      },
+      "combo_index": 27
+    },
+    {
+      "sharpe": -0.1943,
+      "win_rate": 0.2429,
+      "profit_factor": 0.7442,
+      "total_return": -0.0089,
+      "max_drawdown": 0.1606,
+      "num_trades": 140,
+      "params": {
+        "supertrend_multiplier": 2.0,
+        "adx_threshold": 28,
+        "rr1": 1.5,
+        "sl_multiplier": 2.0,
+        "donchian_period": 20,
+        "volume_ma_period": 25
+      },
+      "combo_index": 99
+    },
+    {
+      "sharpe": -0.2018,
+      "win_rate": 0.2815,
+      "profit_factor": 0.7751,
+      "total_return": -0.0066,
+      "max_drawdown": 0.1556,
+      "num_trades": 135,
+      "params": {
+        "supertrend_multiplier": 3.5,
+        "adx_threshold": 22,
+        "rr1": 2.0,
+        "sl_multiplier": 2.0,
+        "donchian_period": 20,
+        "volume_ma_period": 25
+      },
+      "combo_index": 43
+    },
+    {
+      "sharpe": -0.2447,
+      "win_rate": 0.2541,
+      "profit_factor": 0.824,
+      "total_return": -0.0126,
+      "max_drawdown": 0.1552,
+      "num_trades": 185,
+      "params": {
+        "supertrend_multiplier": 2.5,
+        "adx_threshold": 20,
+        "rr1": 2.0,
+        "sl_multiplier": 1.5,
+        "donchian_period": 20,
+        "volume_ma_period": 20
+      },
+      "combo_index": 65
+    }
+  ],
+  "total_combinations": 100
+}
