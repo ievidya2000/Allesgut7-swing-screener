@@ -4,7 +4,7 @@ import sys
 import pickle
 from pathlib import Path
 
-from screener_v2.rl.model_versioning import (
+from rl.model_versioning import (
     get_current_version, deploy_to_production, save_version,
     log_deployment, list_versions, rollback_to_version, get_deployment_log
 )

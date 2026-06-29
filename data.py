@@ -4,7 +4,7 @@ import yfinance as yf
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from screener_v2.config import (
+from config import (
     CACHE_DIR, CACHE_MAX_AGE_HOURS, BATCH_SIZE,
     DOWNLOAD_PERIOD, DOWNLOAD_INTERVAL, JKSE_TICKER
 )
@@ -96,7 +96,7 @@ def _find_matching_cache(ticker, start, end):
                     continue
                 cache_start = df.index.min()
                 cache_end = df.index.max()
-                if cache_start <= start_ts and cache_end >= end_ts - tolerance:
+                if cache_start <= start_ts + pd.Timedelta(days=365) and cache_end >= end_ts - pd.Timedelta(days=90):
                     coverage = len(df)
                     if coverage > best_coverage:
                         best_coverage = coverage

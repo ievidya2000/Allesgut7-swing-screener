@@ -2,12 +2,12 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from screener_v2.data import get_all_market_data, get_fundamental_data
-from screener_v2.indicators import calculate_full_indicators
-from screener_v2.adaptive.config import load_adaptive_config
-from screener_v2.performance.journal import _get_conn, init_db
-from screener_v2.signals import determine_market_regime
-from screener_v2.utils.date_utils import normalize_screen_date
+from data import get_all_market_data, get_fundamental_data, get_jkse_data
+from indicators import calculate_full_indicators
+from adaptive.config import load_adaptive_config
+from performance.journal import _get_conn, init_db
+from signals import determine_market_regime
+from utils.date_utils import normalize_screen_date
 
 
 FEATURE_COLUMNS = [
@@ -28,6 +28,10 @@ FEATURE_COLUMNS = [
     "earnings_growth", "dividend_yield", "log_market_cap", "ps_ratio", "book_value",
     "pe_ratio_rank", "roe_rank", "log_market_cap_rank", "return_5d_rank", "vol_ma_ratio_rank",
     "day_of_week", "month", "quarter",
+    "obv_rising", "ad_rising", "delta_positive", "volume_delta",
+    "rsi", "rsi_oversold", "stoch_k", "stoch_oversold",
+    "macd_histogram", "macd_bullish_cross",
+    "rsi_bullish_div", "macd_bullish_div",
 ]
 
 RETURN_THRESHOLD = 30
@@ -39,7 +43,11 @@ def _safe(val, default=0.0):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return default
     try:
-        return float(val)
+        v = float(val)
+        # Clip extreme values to prevent inf in ML models
+        if np.isinf(v) or abs(v) > 1e10:
+            return default
+        return v
     except (ValueError, TypeError):
         return default
 
@@ -114,7 +122,7 @@ def extract_indicator_features(ticker, signal_date_str, market_data, adaptive_pa
         "vol_ma_ratio": _safe(last.get("vol_ma_ratio")),
         "price_to_supertrend": (c - supertrend_line) / max(c, 1) * 100 if supertrend_line > 0 else 0,
         "di_spread": (plus_di - minus_di) / max(di_sum, 1),
-        "atr_10_slope": _safe(last.get("atr_10_slope")),
+        "atr_10_slope": np.clip(_safe(last.get("atr_10_slope")), -10, 10),
         "price_to_avwap": (c - avwap) / max(c, 1) * 100 if avwap > 0 else 0,
         "tenkan_kijun_spread": (tenkan - kijun) / max(abs(kijun), 1) * 100,
         "cloud_thickness": (cloud_top - cloud_bottom) / max(c, 1) * 100,
@@ -122,6 +130,20 @@ def extract_indicator_features(ticker, signal_date_str, market_data, adaptive_pa
         "volume_zscore": (_safe(last.get("Volume")) - vol_ma_val) / max(vol_std, 1),
         "plus_di": plus_di,
         "minus_di": minus_di,
+        # Volume Pressure features
+        "obv_rising": 1 if last.get("obv_rising") else 0,
+        "ad_rising": 1 if last.get("ad_rising") else 0,
+        "delta_positive": 1 if last.get("delta_positive") else 0,
+        "volume_delta": np.clip(_safe(last.get("volume_delta")), -1e9, 1e9),
+        # Momentum Oscillator features
+        "rsi": _safe(last.get("rsi")),
+        "rsi_oversold": 1 if last.get("rsi_oversold") else 0,
+        "stoch_k": _safe(last.get("stoch_k")),
+        "stoch_oversold": 1 if last.get("stoch_oversold") else 0,
+        "macd_histogram": _safe(last.get("macd_histogram")),
+        "macd_bullish_cross": 1 if last.get("macd_bullish_cross") else 0,
+        "rsi_bullish_div": 1 if last.get("rsi_bullish_div") else 0,
+        "macd_bullish_div": 1 if last.get("macd_bullish_div") else 0,
     }
 
     return features
@@ -178,24 +200,17 @@ def extract_training_data(output_path="rl/training_data.parquet"):
     print(f"Precomputed {len(indicator_cache)} tickers.", flush=True)
 
     print("Loading JKSE and computing market regimes per date...", flush=True)
-    import os
-    jkse_path = None
-    for candidate in ["cache_yfinance/JKSE.parquet", "JKSE.parquet"]:
-        if os.path.exists(candidate):
-            jkse_path = candidate
-            break
+    jkse_df = get_jkse_data(start=data_start, end=data_end)
     jkse_regime_cache = {}
-    if jkse_path:
-        jkse_df = pd.read_parquet(jkse_path)
-        jkse_df.index = pd.to_datetime(jkse_df.index)
-    unique_dates = sorted(preds["screen_date"].unique())
-    for d in unique_dates:
-        d_ts = normalize_screen_date(d)
-        jkse_slice = jkse_df[jkse_df.index <= d_ts]
-        if len(jkse_slice) >= 30:
-            jkse_regime_cache[d] = determine_market_regime(jkse_slice)
-        else:
-            jkse_regime_cache[d] = "SIDEWAYS"
+    if jkse_df is not None:
+        unique_dates = sorted(preds["screen_date"].unique())
+        for d in unique_dates:
+            d_ts = normalize_screen_date(d)
+            jkse_slice = jkse_df[jkse_df.index <= d_ts]
+            if len(jkse_slice) >= 30:
+                jkse_regime_cache[d] = determine_market_regime(jkse_slice)
+            else:
+                jkse_regime_cache[d] = "SIDEWAYS"
         regime_dist = pd.Series(jkse_regime_cache.values()).value_counts()
         print(f"  Regime distribution: {dict(regime_dist)}", flush=True)
     else:

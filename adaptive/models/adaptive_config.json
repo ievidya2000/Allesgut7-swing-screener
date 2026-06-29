@@ -20,5 +20,21 @@
   "score_w_avg_days": -0.3,
   "tp1_pct": 33,
   "tp2_pct": 33,
-  "tp3_pct": 34
+  "tp3_pct": 34,
+  "rl_auto_retrain": false,
+  "rl_min_new_trades": 50,
+  "rsi_period": 14,
+  "rsi_oversold": 30,
+  "rsi_overbought": 70,
+  "macd_fast": 12,
+  "macd_slow": 26,
+  "macd_signal": 9,
+  "stoch_k": 14,
+  "stoch_d": 3,
+  "stoch_smooth": 3,
+  "stoch_oversold": 20,
+  "elliott_swing_lookback": 5,
+  "entry_zone_max_atr": 0.75,
+  "entry_zone_min_atr": 0.25,
+  "entry_zone_max_pct": 0.04
 }

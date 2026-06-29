@@ -1,11 +1,13 @@
 import numpy as np
 import pandas as pd
 
-from screener_v2.config import (
+from config import (
     ATR_LENGTH, ATR_MULTIPLIER, SL_MULTIPLIER,
-    RR1, RR2, RR3, FRESH_SIGNAL_BARS
+    RR1, RR2, RR3, FRESH_SIGNAL_BARS,
+    ENTRY_ZONE_MAX_ATR, ENTRY_ZONE_MIN_ATR, ENTRY_ZONE_MAX_PCT
 )
-from screener_v2.indicators import get_atr, get_supertrend
+from indicators import get_atr, get_supertrend
+from utils.price_utils import round_to_tick
 
 
 def find_swing_points(df, window=10):
@@ -47,7 +49,7 @@ def cluster_levels(prices, atr_val, max_dist=None):
     for c in clusters:
         avg_p = np.mean(c)
         strength = len(c)
-        result.append({"price": round(avg_p, 2), "strength": strength,
+        result.append({"price": round_to_tick(avg_p), "strength": strength,
                         "low": min(c), "high": max(c)})
     return result
 
@@ -65,7 +67,7 @@ def find_fib_levels(df, atr_val):
     for ratio in [0.236, 0.382, 0.5, 0.618, 0.786]:
         levels.append(recent_high - diff * ratio)
 
-    return [{"price": round(p, 2), "strength": 1, "source": "fib"} for p in set(levels)]
+    return [{"price": round_to_tick(p), "strength": 1, "source": "fib"} for p in set(levels)]
 
 
 def find_key_levels(df, atr_val):
@@ -111,33 +113,43 @@ def determine_entry_zone(full_df, levels, setup, close, atr_val):
     conditions = []
     strategy = ""
 
+    # Get Fibonacci levels from Elliott Wave
+    fib_382 = full_df['fib_382'].iloc[-1] if 'fib_382' in full_df.columns else close
+    fib_618 = full_df['fib_618'].iloc[-1] if 'fib_618' in full_df.columns else close
+
+    # Get RSI/Stochastic for momentum confirmation
+    rsi = full_df['rsi'].iloc[-1] if 'rsi' in full_df.columns else 50
+    stoch_k = full_df['stoch_k'].iloc[-1] if 'stoch_k' in full_df.columns else 50
+
     if setup == "PRE_BREAKOUT":
         mid = full_df['donchian_mid'].iloc[-1]
         upper = full_df['donchian_upper'].iloc[-1]
         ma20 = full_df['Close'].rolling(20).mean().iloc[-1]
 
         zone_low = max(mid, ma20) if pd.notna(ma20) else mid
-        zone_high = upper - atr_val * 0.3
+        zone_high = upper - atr_val * ENTRY_ZONE_MIN_ATR
 
-        entry_low = round(zone_low, 2)
-        entry_high = round(zone_high, 2)
+        entry_low = round_to_tick(zone_low)
+        entry_high = round_to_tick(zone_high)
 
         strategy = "Limit di zona konsolidasi"
         conditions = [
             "Volume > MA20",
             "Close > Donchian Mid",
             "ADX rising",
+            f"RSI: {rsi:.0f} (konfirmasi momentum)",
         ]
 
     elif setup == "BREAKOUT":
         upper = full_df['donchian_upper'].iloc[-1]
-        entry_low = round(upper - atr_val * 0.5, 2)
-        entry_high = round(upper + atr_val * 0.5, 2)
+        entry_low = round_to_tick(upper - atr_val * ENTRY_ZONE_MIN_ATR)
+        entry_high = round_to_tick(upper + atr_val * ENTRY_ZONE_MIN_ATR)
         strategy = "Market on confirmation / Limit on retest"
         conditions = [
             "Volume > 150% MA20",
             "Close in upper 25% candle",
             "No gap fill",
+            f"MACD histogram positive",
         ]
 
     elif setup == "ACCUMULATION":
@@ -149,45 +161,75 @@ def determine_entry_zone(full_df, levels, setup, close, atr_val):
             if s["high"] >= lower and s["low"] <= mid:
                 best_support = max(best_support, s["price"])
 
-        entry_low = round(min(best_support, mid), 2)
-        entry_high = round(max(best_support, mid), 2)
+        # Use Fibonacci 61.8% as tighter anchor
+        fib_anchor = fib_618 if lower <= fib_618 <= mid else mid
+        entry_low = round_to_tick(min(best_support, fib_anchor))
+        entry_high = round_to_tick(max(best_support, fib_anchor))
+
+        # Cap zone width
+        zone_width = entry_high - entry_low
+        max_width = close * ENTRY_ZONE_MAX_PCT
+        if zone_width > max_width:
+            zone_mid = (entry_low + entry_high) / 2
+            entry_low = round_to_tick(zone_mid - max_width / 2)
+            entry_high = round_to_tick(zone_mid + max_width / 2)
+
         strategy = "Limit di support — range bound"
         conditions = [
             "Price touch lower band",
             "Volume contraction on pullback",
-            "Oversold RSI (optional)",
+            f"RSI: {rsi:.0f} ({'oversold' if rsi < 30 else 'netral'})",
         ]
 
     elif setup == "VCP":
         bb_mid = full_df['Close'].rolling(20).mean().iloc[-1] if len(full_df) >= 20 else close
-        bb_lower = bb_mid - atr_val * 1.5
-        bb_upper = bb_mid + atr_val * 1.5
+        # TIGHTENED: was 1.5 ATR, now 0.5 ATR
+        bb_lower = bb_mid - atr_val * ENTRY_ZONE_MAX_ATR
+        bb_upper = bb_mid + atr_val * ENTRY_ZONE_MAX_ATR
 
-        entry_low = round(bb_lower, 2)
-        entry_high = round(bb_mid, 2)
+        entry_low = round_to_tick(bb_lower)
+        entry_high = round_to_tick(bb_mid)
+
+        # Cap zone width
+        zone_width = entry_high - entry_low
+        max_width = close * ENTRY_ZONE_MAX_PCT
+        if zone_width > max_width:
+            entry_high = round_to_tick(entry_low + max_width)
+
         strategy = "Limit saat volatilitas menyusut — tunggu expansion"
         conditions = [
             "BB width menyusut",
             "Volume decline 3+ bars",
-            "Wait for volume spike",
+            f"Stochastic: {stoch_k:.0f} ({'oversold' if stoch_k < 20 else 'netral'})",
         ]
 
     elif setup == "TIGHT_BASE_BREAKOUT":
         upper = full_df['donchian_upper'].iloc[-1]
-        entry_low = round(upper - atr_val * 0.3, 2)
-        entry_high = round(upper + atr_val * 0.3, 2)
+        entry_low = round_to_tick(upper - atr_val * ENTRY_ZONE_MIN_ATR)
+        entry_high = round_to_tick(upper + atr_val * ENTRY_ZONE_MIN_ATR)
         strategy = "Market on breakout / Limit on retest"
         conditions = [
             "Tight range < 5%",
             "Inside bars",
             "Volume dry",
+            f"RSI netral: {rsi:.0f}",
         ]
 
     elif setup == "BASE_ON_BASE":
         mid = full_df['donchian_mid'].iloc[-1]
         upper = full_df['donchian_upper'].iloc[-1]
-        entry_low = round(mid, 2)
-        entry_high = round(upper, 2)
+        # TIGHTENED: max 0.75 ATR instead of full Donchian half
+        zone_low = mid
+        zone_high = min(upper, mid + atr_val * ENTRY_ZONE_MAX_ATR)
+        entry_low = round_to_tick(zone_low)
+        entry_high = round_to_tick(zone_high)
+
+        # Cap zone width
+        zone_width = entry_high - entry_low
+        max_width = close * ENTRY_ZONE_MAX_PCT
+        if zone_width > max_width:
+            entry_high = round_to_tick(entry_low + max_width)
+
         strategy = "Limit di atas base kedua — tunggu breakout"
         conditions = [
             "Two stacked bases",
@@ -197,30 +239,32 @@ def determine_entry_zone(full_df, levels, setup, close, atr_val):
 
     elif setup == "BULL_FLAG":
         ma20 = full_df['Close'].rolling(20).mean().iloc[-1] if len(full_df) >= 20 else close
-        entry_low = round(ma20 - atr_val * 0.3, 2)
-        entry_high = round(ma20, 2)
+        entry_low = round_to_tick(ma20 - atr_val * ENTRY_ZONE_MIN_ATR)
+        entry_high = round_to_tick(ma20)
         strategy = "Limit di flag pullback — tunggu bounce"
         conditions = [
             "Flagpole > 15%",
             "Flag < 12%",
             "Declining volume in flag",
+            f"RSI sehat: {rsi:.0f}",
         ]
 
     elif setup == "PULLBACK_MA20":
         ma20 = full_df['Close'].rolling(20).mean().iloc[-1] if len(full_df) >= 20 else close
-        entry_low = round(ma20 - atr_val * 0.2, 2)
-        entry_high = round(ma20 + atr_val * 0.2, 2)
+        entry_low = round_to_tick(ma20 - atr_val * ENTRY_ZONE_MIN_ATR)
+        entry_high = round_to_tick(ma20 + atr_val * ENTRY_ZONE_MIN_ATR)
         strategy = "Limit di MA20 — bounce confirmation"
         conditions = [
             "MA20 rising",
             "Bounce on MA20",
             "Prior uptrend strength",
+            f"RSI: {rsi:.0f} / Stoch: {stoch_k:.0f}",
         ]
 
     elif setup == "EARLY_REVERSAL":
         ma20 = full_df['Close'].rolling(20).mean().iloc[-1] if len(full_df) >= 20 else close
         recent_swing_low = full_df['Low'].tail(15).min()
-        sl_normal = round(close - atr_val * 1.5, 2)
+        sl_normal = round_to_tick(close - atr_val * 1.5)
 
         zone_low = recent_swing_low + atr_val * 1.0
         zone_high = min(ma20, close) if pd.notna(ma20) else close
@@ -232,20 +276,30 @@ def determine_entry_zone(full_df, levels, setup, close, atr_val):
         if zone_high < zone_low:
             zone_high = zone_low + atr_val * 0.5
 
-        entry_low = round(zone_low, 2)
-        entry_high = round(zone_high, 2)
+        entry_low = round_to_tick(zone_low)
+        entry_high = round_to_tick(zone_high)
+
+        # Cap zone width
+        zone_width = entry_high - entry_low
+        max_width = close * ENTRY_ZONE_MAX_PCT
+        if zone_width > max_width:
+            zone_mid = (entry_low + entry_high) / 2
+            entry_low = round_to_tick(zone_mid - max_width / 2)
+            entry_high = round_to_tick(zone_mid + max_width / 2)
+
         strategy = "Limit pada pullback — confirmation needed"
+        rsi_bull_div = full_df['rsi_bullish_div'].iloc[-1] if 'rsi_bullish_div' in full_df.columns else False
         conditions = [
-            "Close > previous candle high",
+            "Divergence detected" if rsi_bull_div else "SuperTrend flip",
             "Volume confirmation",
-            "SuperTrend tetap bullish",
+            f"RSI: {rsi:.0f}",
         ]
 
     # Ensure low < high
     if entry_low > entry_high:
         entry_low, entry_high = entry_high, entry_low
     if entry_low == entry_high:
-        entry_high = round(entry_low + atr_val * 0.3, 2)
+        entry_high = round_to_tick(entry_low + atr_val * ENTRY_ZONE_MIN_ATR)
 
     # Strengthen entry zone with confluence
     confluence = 0
@@ -267,7 +321,7 @@ def determine_sl_wide(full_df, levels, close, atr_val, sl_normal, sl_mult=None):
         sl_mult = SL_MULTIPLIER
     # Wide SL: 2.5×ATR from entry
     sl_by_atr = close - abs(close - sl_normal) * (2.5 / sl_mult)
-    sl_by_atr = round(sl_by_atr, 2)
+    sl_by_atr = round_to_tick(sl_by_atr)
 
     # Structural: below nearest support
     best_support = None
@@ -278,7 +332,7 @@ def determine_sl_wide(full_df, levels, close, atr_val, sl_normal, sl_mult=None):
 
     if best_support is not None:
         # Slightly below support
-        sl_structural = round(best_support - atr_val * 0.3, 2)
+        sl_structural = round_to_tick(best_support - atr_val * 0.3)
         sl_wide = min(sl_by_atr, sl_structural)
         logic = f"2.5×ATR ({sl_by_atr}) atau struktural di bawah {best_support} ({sl_structural})"
     else:
@@ -317,7 +371,7 @@ def analyze_tp_targets(tp1, tp2, tp3, close, levels):
 
         result.append({
             "label": tp_label,
-            "price": round(tp_val, 2),
+            "price": round_to_tick(tp_val),
             "note": note,
         })
 
@@ -328,151 +382,246 @@ def determine_timing(full_df, setup):
     last = full_df.iloc[-1]
     prev = full_df.iloc[-2] if len(full_df) >= 2 else last
 
+    # Get momentum indicators
+    rsi = last.get('rsi', 50)
+    stoch_k = last.get('stoch_k', 50)
+    macd_hist = last.get('macd_histogram', 0)
+
     if setup == "PRE_BREAKOUT":
         vol_ok = last.get('volume_pre_breakout', False)
         above_mid = last['Close'] > last.get('donchian_mid', 0)
+        don_mid = last.get('donchian_mid', 0)
+        rsi_ok = rsi > 50  # momentum naik
 
-        if vol_ok and above_mid:
+        if vol_ok and above_mid and rsi_ok:
             return {
                 "label": "ENTRY_READY",
-                "detail": "Volume confirmation + price above Donchian mid",
+                "detail": f"Siap masuk! Volume naik, harga di atas tengah, RSI {rsi:.0f}",
+                "target_price": None,
+            }
+        elif vol_ok and above_mid:
+            return {
+                "label": "WAIT_MOMENTUM",
+                "detail": f"Volume OK, harga OK, tapi RSI {rsi:.0f} < 50. Tunggu momentum naik",
+                "target_price": None,
             }
         elif vol_ok:
             return {
                 "label": "WAIT_PRICE",
-                "detail": f"Tunggu harga > Donchian mid ({last['donchian_mid']:.0f})",
+                "detail": f"Tunggu harga naik di atas {don_mid:.0f}",
+                "target_price": don_mid,
             }
         else:
+            vol_ma = last.get('volume_ma', 0)
             return {
                 "label": "WAIT_VOLUME",
-                "detail": "Tunggu volume > MA20 + MA5 rising",
+                "detail": f"Tunggu volume naik di atas {vol_ma:.0f}",
+                "target_price": None,
             }
 
     elif setup == "BREAKOUT":
-        if last.get('fresh_breakout', False):
+        macd_ok = macd_hist > 0
+        if last.get('fresh_breakout', False) and macd_ok:
             return {
                 "label": "ENTRY_READY",
-                "detail": "Fresh breakout terdeteksi — entry market di konfirmasi",
+                "detail": f"Breakout + MACD positif! Siap masuk",
+                "target_price": None,
+            }
+        elif last.get('fresh_breakout', False):
+            return {
+                "label": "WAIT_MACD",
+                "detail": f"Breakout terdeteksi tapi MACD belum konfirmasi (hist: {macd_hist:.2f})",
+                "target_price": None,
             }
         elif last.get('donchian_breakout', False):
+            don_upper = last.get('donchian_upper', 0)
             return {
                 "label": "WAIT_RETEST",
-                "detail": f"Tunggu pullback ke Donchian upper ({last['donchian_upper']:.0f})",
+                "detail": f"Tunggu harga kembali ke {don_upper:.0f}",
+                "target_price": don_upper,
             }
-        return {"label": "WAIT", "detail": "Menunggu breakout baru"}
+        return {"label": "WAIT", "detail": "Tunggu breakout baru", "target_price": None}
 
     elif setup == "ACCUMULATION":
-        near_lower = last['Close'] <= last.get('donchian_lower', 0) * 1.02
-        if near_lower:
+        don_lower = last.get('donchian_lower', 0)
+        near_lower = last['Close'] <= don_lower * 1.02
+        rsi_oversold = rsi < 30
+        stoch_oversold = stoch_k < 20
+
+        if near_lower and (rsi_oversold or stoch_oversold):
             return {
                 "label": "ENTRY_READY",
-                "detail": "Price near lower band — limit order siap",
+                "detail": f"Harga di batas bawah + oversold (RSI {rsi:.0f}, Stoch {stoch_k:.0f})",
+                "target_price": None,
+            }
+        elif near_lower:
+            return {
+                "label": "WAIT_MOMENTUM",
+                "detail": f"Harga di bawah tapi belum oversold (RSI {rsi:.0f}). Tunggu konfirmasi momentum",
+                "target_price": None,
             }
         else:
             return {
                 "label": "WAIT_PULLBACK",
-                "detail": f"Tunggu pullback ke Donchian lower ({last['donchian_lower']:.0f})",
+                "detail": f"Tunggu harga turun ke {don_lower:.0f}",
+                "target_price": don_lower,
             }
 
     elif setup == "EARLY_REVERSAL":
         st_bullish = last.get('supertrend_bullish', False)
         st_prev_bullish = prev.get('supertrend_dir', -1) > 0 if 'supertrend_dir' in prev else False
+        ma20 = last.get('ma20', 0)
 
-        if st_bullish and not st_prev_bullish:
+        # Leading: Divergence detection
+        rsi_bull_div = last.get('rsi_bullish_div', False)
+        macd_bull_div = last.get('macd_bullish_div', False)
+        stoch_bull_cross = last.get('stoch_bullish_cross', False)
+        macd_bull_cross = last.get('macd_bullish_cross', False)
+
+        fresh_st_flip = st_bullish and not st_prev_bullish
+        divergence_signal = (rsi_bull_div or macd_bull_div) and (stoch_bull_cross or macd_bull_cross)
+
+        if fresh_st_flip or divergence_signal:
+            signal_type = "SuperTrend flip" if fresh_st_flip else "Divergence terdeteksi"
             return {
                 "label": "ENTRY_READY",
-                "detail": "SuperTrend baru flip bullish — entry on confirmation",
+                "detail": f"{signal_type}! Siap masuk (RSI {rsi:.0f})",
+                "target_price": None,
             }
         elif st_bullish:
             return {
                 "label": "WAIT_PULLBACK",
-                "detail": "Cari pullback ke AVWAP / MA20 untuk entry",
+                "detail": f"Tunggu harga turun ke MA20 ({ma20:.0f})",
+                "target_price": ma20,
             }
         return {
             "label": "WAIT_CONFIRMATION",
-            "detail": "Tunggu SuperTrend flip + volume confirmation",
+            "detail": f"Tunggu konfirmasi tren berbalik naik (RSI {rsi:.0f}, Stoch {stoch_k:.0f})",
+            "target_price": None,
         }
 
     elif setup == "VCP":
         bb_width = last.get('bb_width', 0)
         bb_width_prev = prev.get('bb_width', 999) if len(full_df) >= 2 else 999
         contracting = bb_width < bb_width_prev
-        vol_low = last.get('volume_ma', 0) > 0 and last.get('Volume', 0) < last.get('volume_ma', 0) * 0.8
+        vol_ma = last.get('volume_ma', 0)
+        vol_low = vol_ma > 0 and last.get('Volume', 0) < vol_ma * 0.8
+        stoch_ready = stoch_k < 20 or rsi < 45
 
-        if contracting and vol_low:
+        if contracting and vol_low and stoch_ready:
             return {
                 "label": "ENTRY_READY",
-                "detail": "Volatilitas menyusut + volume rendah — siap untuk entry",
+                "detail": f"Harga tenang, volume rendah, momentum siap (Stoch {stoch_k:.0f})",
+                "target_price": None,
+            }
+        elif contracting and vol_low:
+            return {
+                "label": "WAIT_MOMENTUM",
+                "detail": f"Kontraksi OK, volume OK, tapi Stoch {stoch_k:.0f} belum oversold",
+                "target_price": None,
             }
         elif contracting:
             return {
                 "label": "WAIT_VOLUME",
-                "detail": "Kontraksi volatilitas aktif — tunggu volume kering",
+                "detail": f"Tunggu volume turun di bawah {vol_ma * 0.8:.0f}",
+                "target_price": None,
             }
-        return {"label": "WAIT", "detail": "Tunggu volatilitas mulai menyusut"}
+        return {"label": "WAIT", "detail": "Tunggu harga mulai tenang", "target_price": None}
 
     elif setup == "TIGHT_BASE_BREAKOUT":
         inside_bars = last.get('consecutive_inside', 0)
         breakout_ready = inside_bars >= 3
+        rsi_neutral = 40 <= rsi <= 60
 
-        if breakout_ready:
+        if breakout_ready and rsi_neutral:
             return {
                 "label": "ENTRY_READY",
-                "detail": f"{inside_bars} inside bars — breakout siap",
+                "detail": f"{inside_bars} inside bars + RSI netral ({rsi:.0f}), siap breakout",
+                "target_price": None,
+            }
+        elif breakout_ready:
+            return {
+                "label": "WAIT_MOMENTUM",
+                "detail": f"Inside bars OK tapi RSI {rsi:.0f} belum netral",
+                "target_price": None,
             }
         return {
             "label": "WAIT",
             "detail": f"Inside bars: {inside_bars}/3 minimum",
+            "target_price": None,
         }
 
     elif setup == "BASE_ON_BASE":
-        above_mid = last['Close'] > last.get('donchian_mid', 0)
+        don_mid = last.get('donchian_mid', 0)
+        above_mid = last['Close'] > don_mid
 
         if above_mid:
             return {
                 "label": "ENTRY_READY",
-                "detail": "Harga di atas base — tunggu breakout confirmation",
+                "detail": "Harga di atas base, siap masuk",
+                "target_price": None,
             }
         return {
             "label": "WAIT_PRICE",
-            "detail": f"Tunggu harga > Donchian mid ({last.get('donchian_mid', 0):.0f})",
+            "detail": f"Tunggu harga naik di atas {don_mid:.0f}",
+            "target_price": don_mid,
         }
 
     elif setup == "BULL_FLAG":
         ma20_val = last.get('ma20', last['Close'])
         near_ma20 = abs(last['Close'] - ma20_val) / last['Close'] < 0.05 if last['Close'] > 0 else False
         vol_declining = last.get('Volume', 0) < last.get('volume_ma', last['Close']) * 0.8 if last.get('volume_ma', 0) > 0 else False
+        rsi_healthy = rsi > 40
 
-        if near_ma20 and vol_declining:
+        if near_ma20 and vol_declining and rsi_healthy:
             return {
                 "label": "ENTRY_READY",
-                "detail": "Flag pullback ke MA20 + volume rendah",
+                "detail": f"Harga bounce di MA20, volume rendah, RSI sehat ({rsi:.0f})",
+                "target_price": None,
+            }
+        elif near_ma20 and vol_declining:
+            return {
+                "label": "WAIT_MOMENTUM",
+                "detail": f"MA20 + volume OK, tapi RSI {rsi:.0f} lemah",
+                "target_price": None,
             }
         elif vol_declining:
             return {
                 "label": "WAIT_PULLBACK",
-                "detail": "Volume sudah rendah — tunggu pullback ke MA20",
+                "detail": f"Tunggu harga turun ke MA20 ({ma20_val:.0f})",
+                "target_price": ma20_val,
             }
-        return {"label": "WAIT", "detail": "Tunggu flag terbentuk + volume decline"}
+        return {"label": "WAIT", "detail": "Tunggu flag terbentuk", "target_price": None}
 
     elif setup == "PULLBACK_MA20":
         ma20 = last.get('ma20', 0)
         ma20_rising = last.get('ma20_slope', 0) > 0
         near_ma20 = abs(last['Close'] - ma20) / ma20 < 0.03 if ma20 > 0 else False
+        rsi_oversold = rsi < 30
+        stoch_bull_cross = last.get('stoch_bullish_cross', False)
+        momentum_bounce = rsi_oversold or stoch_bull_cross
 
-        if near_ma20 and ma20_rising:
+        if near_ma20 and ma20_rising and momentum_bounce:
             return {
                 "label": "ENTRY_READY",
-                "detail": "Bounce di MA20 + MA20 rising",
+                "detail": f"Harga bounce di MA20 + momentum oversold (RSI {rsi:.0f})",
+                "target_price": None,
+            }
+        elif near_ma20 and ma20_rising:
+            return {
+                "label": "WAIT_MOMENTUM",
+                "detail": f"MA20 OK tapi RSI {rsi:.0f} belum oversold",
+                "target_price": None,
             }
         elif ma20_rising:
             return {
                 "label": "WAIT_PULLBACK",
-                "detail": "MA20 rising — tunggu pullback ke MA20",
+                "detail": f"Tunggu harga turun ke MA20 ({ma20:.0f})",
+                "target_price": ma20,
             }
-        return {"label": "WAIT", "detail": "Tunggu MA20 mulai rising"}
+        return {"label": "WAIT", "detail": "Tunggu MA20 mulai naik", "target_price": None}
 
-    return {"label": "HOLD", "detail": ""}
+    return {"label": "HOLD", "detail": "", "target_price": None}
 
 
 def generate_ascii_chart(close, entry_zone, sl_normal, sl_wide, tp_analysis, levels):
@@ -575,19 +724,19 @@ def generate_deep_analysis(full_df, setup, close, atr_val, custom_params=None):
     entry_mid = (entry_zone["low"] + entry_zone["high"]) / 2
     ref_price = max(entry_mid, close * 0.92)  # Jangan terlalu jauh dari harga aktual
 
-    sl_normal = round(ref_price - atr_val * sl_mult, 2)
+    sl_normal = round_to_tick(ref_price - atr_val * sl_mult)
     risk = abs(ref_price - sl_normal)
-    tp1 = round(ref_price + risk * rr1, 2)
-    tp2 = round(ref_price + risk * rr2, 2)
-    tp3 = round(ref_price + risk * rr3, 2)
+    tp1 = round_to_tick(ref_price + risk * rr1)
+    tp2 = round_to_tick(ref_price + risk * rr2)
+    tp3 = round_to_tick(ref_price + risk * rr3)
 
     # Pastikan TP selalu di atas harga saat ini (untuk long setups)
     if tp1 <= close:
-        sl_normal = round(close - atr_val * sl_mult, 2)
+        sl_normal = round_to_tick(close - atr_val * sl_mult)
         risk = close - sl_normal
-        tp1 = round(close + risk * rr1, 2)
-        tp2 = round(close + risk * rr2, 2)
-        tp3 = round(close + risk * rr3, 2)
+        tp1 = round_to_tick(close + risk * rr1)
+        tp2 = round_to_tick(close + risk * rr2)
+        tp3 = round_to_tick(close + risk * rr3)
         ref_price = close
 
     # ── Enforce: SL must be below entry zone ──
@@ -596,19 +745,19 @@ def generate_deep_analysis(full_df, setup, close, atr_val, custom_params=None):
     zone_width = entry_high - entry_low
     min_sl = entry_low - zone_width * 0.20
     if sl_normal >= entry_low:
-        sl_normal = round(min_sl, 2)
+        sl_normal = round_to_tick(min_sl)
         risk = abs(ref_price - sl_normal)
-        tp1 = round(ref_price + risk * rr1, 2)
-        tp2 = round(ref_price + risk * rr2, 2)
-        tp3 = round(ref_price + risk * rr3, 2)
+        tp1 = round_to_tick(ref_price + risk * rr1)
+        tp2 = round_to_tick(ref_price + risk * rr2)
+        tp3 = round_to_tick(ref_price + risk * rr3)
 
     # ── Enforce: SL must be below entry price (close) ──
     if sl_normal >= close:
-        sl_normal = round(close - atr_val * sl_mult, 2)
+        sl_normal = round_to_tick(close - atr_val * sl_mult)
         risk = abs(close - sl_normal)
-        tp1 = round(close + risk * rr1, 2)
-        tp2 = round(close + risk * rr2, 2)
-        tp3 = round(close + risk * rr3, 2)
+        tp1 = round_to_tick(close + risk * rr1)
+        tp2 = round_to_tick(close + risk * rr2)
+        tp3 = round_to_tick(close + risk * rr3)
         ref_price = close
 
     sl_wide = determine_sl_wide(full_df, levels, ref_price, atr_val, sl_normal, sl_mult)

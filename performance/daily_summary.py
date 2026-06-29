@@ -6,11 +6,11 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from screener_v2.performance.journal import (
+from performance.journal import (
     init_db, get_all_predictions, get_trade_results, get_journal_summary
 )
-from screener_v2.performance.realtime import run_full_check
-from screener_v2.performance.metrics import (
+from performance.realtime import run_full_check
+from performance.metrics import (
     win_rate, avg_return, profit_factor
 )
 

@@ -1,9 +1,21 @@
 import numpy as np
 import pandas as pd
 import warnings
+import logging
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
-from screener_v2.config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
+from config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
+
+logger = logging.getLogger("markov")
+
+# Global counter for Markov failures
+_markov_failures = 0
+_markov_total = 0
+
+
+def get_markov_stats():
+    """Return Markov fit statistics."""
+    return {"failures": _markov_failures, "total": _markov_total}
 
 
 def calculate_tp_sl(close, atr, signal_type, custom_params=None):
@@ -60,12 +72,17 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
             sigma = cached_params["sigma"]
             transition_matrix = cached_params["transition_matrix"]
     else:
+        global _markov_failures, _markov_total
+        _markov_total += 1
         use_markov = True
         try:
             model = MarkovRegression(
                 returns, k_regimes=2, trend='c', switching_variance=True
             )
-            res = model.fit(disp=False, maxiter=50)
+            # Suppress statsmodels warnings during fit
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                res = model.fit(disp=False, maxiter=100, em_iter=50)
             if not res.mle_retvals.get('converged', False):
                 raise ValueError("Markov model did not converge")
 
@@ -83,7 +100,9 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
             transition_matrix = np.array([[p00, 1 - p00], [p10, 1 - p10]])
         except Exception as e:
             use_markov = False
-            print(f"Markov fit failed: {e}", flush=True)
+            _markov_failures += 1
+            if _markov_failures <= 3:
+                logger.warning(f"Markov fit failed: {e}")
 
         if markov_cache is not None and markov_cache_key is not None:
             if use_markov:

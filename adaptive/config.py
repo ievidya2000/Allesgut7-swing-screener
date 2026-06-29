@@ -29,8 +29,25 @@ DEFAULT_CONFIG = {
     "tp1_pct": 60,
     "tp2_pct": 25,
     "tp3_pct": 15,
-    "rl_auto_retrain": True,
+    "rl_auto_retrain": False,
     "rl_min_new_trades": 50,
+    # Momentum Oscillators
+    "rsi_period": 14,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "stoch_k": 14,
+    "stoch_d": 3,
+    "stoch_smooth": 3,
+    "stoch_oversold": 20,
+    # Elliott Wave
+    "elliott_swing_lookback": 5,
+    # Entry Zone
+    "entry_zone_max_atr": 0.75,
+    "entry_zone_min_atr": 0.25,
+    "entry_zone_max_pct": 0.04,
 }
 
 _config_cache = None

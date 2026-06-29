@@ -40,6 +40,7 @@ from performance.calibration import calibration_analysis, brier_score, expected_
 from performance.backtest import run_screening_at_date
 from rl.auto_retrain import auto_retrain, get_retrain_status
 from utils.date_utils import normalize_screen_date, safe_screen_date_str
+from utils.price_utils import round_to_tick
 
 # ── Page config ──
 st.set_page_config(page_title="Swing Screener v2", layout="wide", initial_sidebar_state="expanded")
@@ -539,31 +540,34 @@ def render_sidebar():
         # Filters (visible after screening)
         if st.session_state.screening_done and st.session_state.screening_df is not None:
             df = st.session_state.screening_df
-            st.subheader("🔎 Filters")
+            if df.empty or "Setup" not in df.columns:
+                st.warning("No screening results. Run the screener first.")
+            else:
+                st.subheader("🔎 Filters")
 
-            selected_setups = []
-            for s in SETUP_ORDER:
-                cnt = len(df[df["Setup"] == s])
-                if st.checkbox(f"{s} ({cnt})", value=True, key=f"filt_{s}"):
-                    selected_setups.append(s)
+                selected_setups = []
+                for s in SETUP_ORDER:
+                    cnt = len(df[df["Setup"] == s])
+                    if st.checkbox(f"{s} ({cnt})", value=True, key=f"filt_{s}"):
+                        selected_setups.append(s)
 
-            st.session_state._filter_setups = selected_setups
+                st.session_state._filter_setups = selected_setups
 
-            st.slider("Min Score", 0, 200, 0, key="filt_min_score")
+                st.slider("Min Score", 0, 200, 0, key="filt_min_score")
 
-            timing_opts = ["All"] + [k for k, v in TIMING_MAP.items() if v[0] in ("🟢", "🟡")]
-            st.selectbox("Timing", timing_opts, key="filt_timing")
+                timing_opts = ["All"] + [k for k, v in TIMING_MAP.items() if v[0] in ("🟢", "🟡")]
+                st.selectbox("Timing", timing_opts, key="filt_timing")
 
         st.divider()
-        st.markdown("""
-        <div style="text-align: center; padding: 8px 0;">
-            <div class="dyor-disclaimer-small">
-                ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
-            </div>
-            <p style="color: #455A64; font-size: 0.7rem; margin: 0;">Built with Streamlit + yfinance</p>
-            <p style="color: #37474F; font-size: 0.65rem; margin: 4px 0 0 0;">Swing Screener v2</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # st.markdown("""
+        # <div style="text-align: center; padding: 8px 0;">
+        #     <div class="dyor-disclaimer-small">
+        #         ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+        #     </div>
+        #     <p style="color: #455A64; font-size: 0.7rem; margin: 0;">Built with Streamlit + yfinance</p>
+        #     <p style="color: #37474F; font-size: 0.65rem; margin: 4px 0 0 0;">Swing Screener v2</p>
+        # </div>
+        # """, unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════
@@ -572,7 +576,7 @@ def render_sidebar():
 
 def render_dashboard():
     df = st.session_state.screening_df
-    if df is None or df.empty:
+    if df is None or df.empty or "Setup" not in df.columns:
         st.info("Run the screener first from the sidebar.")
         return
 
@@ -692,7 +696,7 @@ def render_dashboard():
 
 def render_results():
     df = st.session_state.screening_df
-    if df is None or df.empty:
+    if df is None or df.empty or "Setup" not in df.columns:
         st.info("Run the screener first.")
         return
 
@@ -770,9 +774,19 @@ def render_results():
 
             st.text(da['chart'])
 
-    # CSV download
-    csv = filtered.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Download CSV", csv, "hasil_screener_v2.csv", "text/csv", use_container_width=True)
+    # CSV download with analysis date
+    analysis_date = datetime.now().strftime("%d%b%Y")
+    csv_filename = f"hasil_screener_{analysis_date}.csv"
+    
+    analysis_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    market_regime = st.session_state.get('market_regime', 'N/A')
+    header = f"# Swing Screener Analysis - {analysis_timestamp}\n"
+    header += f"# Market Regime: {market_regime}\n"
+    header += f"# Total Setups: {len(filtered)}\n#\n"
+    
+    csv_content = filtered.to_csv(index=False)
+    csv = (header + csv_content).encode("utf-8")
+    st.download_button("📥 Download CSV", csv, csv_filename, "text/csv", use_container_width=True)
 
     # Per-Setup Top 5
     st.divider()
@@ -821,14 +835,14 @@ def render_results():
 # ═══════════════════════════════════════════
 
 def render_plotly_chart(full, da, levels):
-    n_bars = min(60, len(full))
+    n_bars = min(120, len(full))
     df = full.tail(n_bars).copy()
     df = df.reset_index()
 
     fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
+        rows=3, cols=1, shared_xaxes=True,
         vertical_spacing=0.03,
-        row_heights=[0.8, 0.2],
+        row_heights=[0.6, 0.2, 0.2],
     )
 
     # ── Candlestick ──
@@ -867,30 +881,27 @@ def render_plotly_chart(full, da, levels):
                 showlegend=False,
             ), row=1, col=1)
 
-    # ── Donchian channels ──
-    if 'donchian_upper' in df.columns:
+    # ── MA20 + MA50 ──
+    if 'ma20' in df.columns:
         fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['donchian_upper'],
-            mode='lines', name='Donchian Upper',
-            line=dict(color='#42a5f5', width=1, dash='dash'),
+            x=df['Date'], y=df['ma20'],
+            mode='lines', name='MA20',
+            line=dict(color='#42a5f5', width=1.5),
             showlegend=True,
         ), row=1, col=1)
+    if 'ma50' in df.columns:
         fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['donchian_lower'],
-            mode='lines', name='Donchian Lower',
-            line=dict(color='#42a5f5', width=1, dash='dash'),
+            x=df['Date'], y=df['ma50'],
+            mode='lines', name='MA50',
+            line=dict(color='#ab47bc', width=1.5),
             showlegend=True,
-        ), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['donchian_mid'],
-            mode='lines', name='Donchian Mid',
-            line=dict(color='#42a5f5', width=0.5),
-            showlegend=False,
         ), row=1, col=1)
 
     # ── Entry Zone highlight ──
     entry_low = da['entry_zone']['low']
     entry_high = da['entry_zone']['high']
+    entry_low_ticked = round_to_tick(entry_low)
+    entry_high_ticked = round_to_tick(entry_high)
     fig.add_hrect(
         y0=entry_low, y1=entry_high,
         fillcolor='rgba(255, 235, 59, 0.15)', line_width=0,
@@ -900,49 +911,32 @@ def render_plotly_chart(full, da, levels):
         x=[None], y=[None],
         mode='lines',
         line=dict(color='rgba(255, 235, 59, 0.5)', width=2),
-        name=f'Entry Zone ({entry_low:.0f}-{entry_high:.0f})',
+        name=f'Entry Zone ({entry_low_ticked:.0f}-{entry_high_ticked:.0f})',
         showlegend=True,
     ), row=1, col=1)
-
-    # ── Support levels ──
-    for s in levels.get("supports", [])[:3]:
-        fig.add_hline(
-            y=s['price'], line_dash='dot', line_color='#66bb6a',
-            annotation_text=f"Sup {s['price']:.0f}",
-            annotation_position='bottom right',
-            annotation_font_size=9,
-            row=1, col=1,
-        )
-
-    # ── Resistance levels ──
-    for r in levels.get("resistances", [])[:3]:
-        fig.add_hline(
-            y=r['price'], line_dash='dot', line_color='#ef5350',
-            annotation_text=f"Res {r['price']:.0f}",
-            annotation_position='top right',
-            annotation_font_size=9,
-            row=1, col=1,
-        )
 
     # ── SL lines ──
     sl_normal = da['sl_normal']
     sl_wide = da['sl_wide']['price']
     fig.add_hline(y=sl_normal, line_dash='solid', line_color='#ef5350',
-                  line_width=2, annotation_text=f"SL {sl_normal:.0f}",
+                  line_width=2, annotation_text=f"SL {round_to_tick(sl_normal):.0f}",
                   annotation_position='bottom left', row=1, col=1)
     fig.add_hline(y=sl_wide, line_dash='dash', line_color='#ef5350',
-                  line_width=1.5, annotation_text=f"SL Wide {sl_wide:.0f}",
+                  line_width=1.5, annotation_text=f"SL Wide {round_to_tick(sl_wide):.0f}",
                   annotation_position='bottom left', row=1, col=1)
 
     # ── TP lines ──
     for ta in da['tp_analysis']:
         fig.add_hline(y=ta['price'], line_dash='solid', line_color='#66bb6a',
-                      line_width=1.5, annotation_text=f"{ta['label']} {ta['price']:.0f}",
+                      line_width=1.5, annotation_text=f"{ta['label']} {round_to_tick(ta['price']):.0f}",
                       annotation_position='top left', row=1, col=1)
 
-    # ── Volume bars ──
-    colors = ['#26a69a' if c >= o else '#ef5350'
-              for c, o in zip(df['Close'], df['Open'])]
+    # ── Volume bars (colored by delta) ──
+    if 'delta_positive' in df.columns:
+        colors = ['#26a69a' if dp else '#ef5350' for dp in df['delta_positive']]
+    else:
+        colors = ['#26a69a' if c >= o else '#ef5350'
+                  for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(
         x=df['Date'], y=df['Volume'],
         marker_color=colors, name='Volume',
@@ -958,9 +952,38 @@ def render_plotly_chart(full, da, levels):
             showlegend=False,
         ), row=2, col=1)
 
+    # ── Momentum: RSI + Stochastic + MACD ──
+    if 'rsi' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df['Date'], y=df['rsi'],
+            mode='lines', name='RSI',
+            line=dict(color='#42a5f5', width=1.5),
+            showlegend=True,
+        ), row=3, col=1)
+        # RSI levels
+        fig.add_hline(y=30, line_dash='dot', line_color='#66bb6a', line_width=0.5, row=3, col=1)
+        fig.add_hline(y=70, line_dash='dot', line_color='#ef5350', line_width=0.5, row=3, col=1)
+
+    if 'stoch_k' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df['Date'], y=df['stoch_k'],
+            mode='lines', name='Stoch %K',
+            line=dict(color='#ffa726', width=1),
+            showlegend=True,
+        ), row=3, col=1)
+        fig.add_trace(go.Scatter(
+            x=df['Date'], y=df['stoch_d'],
+            mode='lines', name='Stoch %D',
+            line=dict(color='#ff7043', width=1),
+            showlegend=True,
+        ), row=3, col=1)
+        # Stochastic levels
+        fig.add_hline(y=20, line_dash='dot', line_color='#66bb6a', line_width=0.5, row=3, col=1)
+        fig.add_hline(y=80, line_dash='dot', line_color='#ef5350', line_width=0.5, row=3, col=1)
+
     # ── Layout ──
     fig.update_layout(
-        height=600,
+        height=750,
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
@@ -972,6 +995,7 @@ def render_plotly_chart(full, da, levels):
     fig.update_yaxes(gridcolor='rgba(128,128,128,0.2)')
     fig.update_yaxes(title_text='Price', row=1, col=1)
     fig.update_yaxes(title_text='Volume', row=2, col=1)
+    fig.update_yaxes(title_text='RSI/Stoch', row=3, col=1)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -988,7 +1012,7 @@ def render_analysis():
 
     # Default: only screening results; optional: show all
     screening_df = st.session_state.get("screening_df")
-    screening_tickers = set(screening_df["Ticker"].tolist()) if screening_df is not None and not screening_df.empty else set()
+    screening_tickers = set(screening_df["Ticker"].tolist()) if screening_df is not None and not screening_df.empty and "Ticker" in screening_df.columns else set()
 
     show_all = st.checkbox("Show all tickers (including non-screened)", value=False)
     if show_all:
@@ -1021,29 +1045,40 @@ def render_analysis():
         close = last['Close']
         atr = last['atr_rm']
 
+        # Format last date
+        last_date = full.index[-1]
+        now = datetime.now()
+        try:
+            last_date_formatted = last_date.strftime("%A, %d %B %Y")
+            is_today = hasattr(last_date, 'date') and last_date.date() == now.date()
+            price_label = "last price" if is_today else "close"
+        except Exception:
+            last_date_formatted = last_date.strftime("%Y-%m-%d")
+            price_label = "close"
+
         # ── Trade Assistant Header ──
         setup_color = COLOR_MAP.get(setup, "#888") if valid else "#888"
         regime_emoji = {"BULL": "🟢", "SIDEWAYS": "🟡", "BEAR": "🔴"}.get(stock_regime, "⚪")
 
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 16px; padding: 28px; margin-bottom: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <h2 style="margin: 0; color: #ECEFF1; font-size: 1.4rem;">Trade Assistant</h2>
-                <span style="background: {setup_color}22; color: {setup_color}; padding: 6px 14px; border-radius: 8px;
-                    font-weight: 600; font-size: 0.85rem; border: 1px solid {setup_color}44;">
+            border-radius: 14px; padding: 14px; margin-bottom: 0.6rem; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                <h2 style="margin: 0; color: #ECEFF1; font-size: 1.2rem;">Trade Assistant</h2>
+                <span style="background: {setup_color}22; color: {setup_color}; padding: 4px 10px; border-radius: 6px;
+                    font-weight: 600; font-size: 0.8rem; border: 1px solid {setup_color}44;">
                     {setup if valid else 'NO SETUP'}
                 </span>
-                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
-                    font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 4px 10px; border-radius: 6px;
+                    font-weight: 500; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);">
                     📈 {ticker}
                 </span>
-                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
-                    font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
-                    💰 {close:.2f}
+                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 4px 10px; border-radius: 6px;
+                    font-weight: 500; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);">
+                    💰 {round_to_tick(close):.0f} ({price_label} {last_date_formatted})
                 </span>
-                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 6px 14px; border-radius: 8px;
-                    font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="background: rgba(255,255,255,0.05); color: #B0BEC5; padding: 4px 10px; border-radius: 6px;
+                    font-weight: 500; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);">
                     {regime_emoji} {stock_regime}
                 </span>
             </div>
@@ -1058,6 +1093,13 @@ def render_analysis():
             timing_label = timing_data['label']
             timing_emoji = TIMING_MAP.get(timing_label, ("⚪", ""))[0]
             timing_color = "#66BB6A" if timing_label == "ENTRY_READY" else "#FFA726" if "WAIT" in timing_label else "#90A4AE"
+            target_price = timing_data.get('target_price')
+
+            # Format timing display with target price
+            if target_price:
+                timing_display = f"{timing_label.replace('_', ' ').title()} ({target_price:.0f})"
+            else:
+                timing_display = timing_label.replace('_', ' ').title()
 
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -1065,7 +1107,7 @@ def render_analysis():
                 <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
                     border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
                     <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Entry Zone</div>
-                    <div style="color: #ECEFF1; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{da['entry_zone']['low']:.0f} - {da['entry_zone']['high']:.0f}</div>
+                    <div style="color: #ECEFF1; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{round_to_tick(da['entry_zone']['low']):.0f} - {round_to_tick(da['entry_zone']['high']):.0f}</div>
                     <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">{da['entry_zone']['strategy']}</div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1073,9 +1115,9 @@ def render_analysis():
                 st.markdown(f"""
                 <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
                     border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
-                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Stop Loss</div>
-                    <div style="color: #EF5350; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{da['sl_normal']:.0f}</div>
-                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">Wide: {da['sl_wide']['price']:.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Batas Rugi</div>
+                    <div style="color: #EF5350; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{round_to_tick(da['sl_normal']):.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">Wide: {round_to_tick(da['sl_wide']['price']):.0f}</div>
                 </div>
                 """, unsafe_allow_html=True)
             with col3:
@@ -1084,23 +1126,119 @@ def render_analysis():
                     border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
                     <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Timing</div>
                     <div style="color: {timing_color}; font-size: 1.5rem; font-weight: 700;">{timing_emoji}</div>
-                    <div style="color: {timing_color}; font-size: 0.85rem; font-weight: 600; margin-top: 4px;">{timing_label.replace('_', ' ').title()}</div>
+                    <div style="color: {timing_color}; font-size: 0.85rem; font-weight: 600; margin-top: 4px;">{timing_display}</div>
                 </div>
                 """, unsafe_allow_html=True)
             with col4:
                 st.markdown(f"""
                 <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
                     border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
-                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Take Profit</div>
-                    <div style="color: #66BB6A; font-size: 1.1rem; font-weight: 700; font-family: 'Inter', monospace;">{da['tp_analysis'][0]['price']:.0f}</div>
-                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">TP2: {da['tp_analysis'][1]['price']:.0f} | TP3: {da['tp_analysis'][2]['price']:.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Target Profit</div>
+                    <div style="color: #66BB6A; font-size: 1.1rem; font-weight: 700; font-family: 'Inter', monospace;">{round_to_tick(da['tp_analysis'][0]['price']):.0f}</div>
+                    <div style="color: #78909C; font-size: 0.75rem; margin-top: 4px;">TP2: {round_to_tick(da['tp_analysis'][1]['price']):.0f} | TP3: {round_to_tick(da['tp_analysis'][2]['price']):.0f}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # TP row with native metrics for delta info
-            tp_cols = st.columns(3)
-            for i, ta in enumerate(da['tp_analysis']):
-                tp_cols[i].metric(ta['label'], ta['price'], ta['note'])
+            # ── Action Box (Langkah Selanjutnya) ──
+            entry_low = da['entry_zone']['low']
+            entry_high = da['entry_zone']['high']
+            sl = da['sl_normal']
+            tp1 = da['tp_analysis'][0]['price']
+            tp2 = da['tp_analysis'][1]['price']
+            tp3 = da['tp_analysis'][2]['price']
+
+            if timing_label == "ENTRY_READY":
+                action_items = [
+                    f"Siap masuk! Entry di zona {round_to_tick(entry_low):.0f} - {round_to_tick(entry_high):.0f}",
+                    f"Batas rugi di {round_to_tick(sl):.0f}",
+                    f"Target profit: {round_to_tick(tp1):.0f} → {round_to_tick(tp2):.0f} → {round_to_tick(tp3):.0f}",
+                ]
+                action_color = "#66BB6A"
+                action_emoji = "✅"
+                action_title = "SIAP MASUK"
+            elif "WAIT_PULLBACK" in timing_label:
+                if target_price:
+                    action_items = [
+                        f"Tunggu harga turun ke {round_to_tick(target_price):.0f} dulu",
+                        f"Setelah sampai, entry di zona {round_to_tick(target_price):.0f} - {round_to_tick(target_price * 1.02):.0f}",
+                        f"Batas rugi di {round_to_tick(sl):.0f}",
+                    ]
+                else:
+                    action_items = [
+                        "Tunggu harga turun dulu sebelum masuk",
+                        f"Entry di zona {round_to_tick(entry_low):.0f} - {round_to_tick(entry_high):.0f}",
+                        f"Batas rugi di {round_to_tick(sl):.0f}",
+                    ]
+                action_color = "#FFA726"
+                action_emoji = "⏳"
+                action_title = "TUNGGU PULLBACK"
+            elif "WAIT_RETEST" in timing_label:
+                if target_price:
+                    action_items = [
+                        f"Tunggu harga kembali ke {round_to_tick(target_price):.0f}",
+                        f"Setelah test ulang, entry di zona {round_to_tick(target_price):.0f} - {round_to_tick(target_price * 1.02):.0f}",
+                        f"Batas rugi di {round_to_tick(sl):.0f}",
+                    ]
+                else:
+                    action_items = [
+                        "Tunggu harga test ulang level kunci",
+                        f"Entry di zona {round_to_tick(entry_low):.0f} - {round_to_tick(entry_high):.0f}",
+                        f"Batas rugi di {round_to_tick(sl):.0f}",
+                    ]
+                action_color = "#FFA726"
+                action_emoji = "⏳"
+                action_title = "TUNGGU RETEST"
+            elif "WAIT_VOLUME" in timing_label:
+                action_items = [
+                    "Tunggu volume naik dulu sebelum masuk",
+                    f"Entry di zona {round_to_tick(entry_low):.0f} - {round_to_tick(entry_high):.0f} setelah volume konfirmasi",
+                    f"Batas rugi di {round_to_tick(sl):.0f}",
+                ]
+                action_color = "#FFA726"
+                action_emoji = "⏳"
+                action_title = "TUNGGU VOLUME"
+            elif "WAIT_PRICE" in timing_label:
+                if target_price:
+                    action_items = [
+                        f"Tunggu harga naik di atas {target_price:.0f}",
+                        f"Entry di zona {entry_low:.0f} - {entry_high:.0f} setelah breakout",
+                        f"Batas rugi di {sl:.0f}",
+                    ]
+                else:
+                    action_items = [
+                        "Tunggu harga bergerak lebih tinggi",
+                        f"Entry di zona {entry_low:.0f} - {entry_high:.0f}",
+                        f"Batas rugi di {sl:.0f}",
+                    ]
+                action_color = "#FFA726"
+                action_emoji = "⏳"
+                action_title = "TUNGGU BREAKOUT"
+            else:
+                action_items = [
+                    "Belum ada sinyal entry yang jelas",
+                    "Tunggu konfirmasi lebih lanjut",
+                ]
+                action_color = "#90A4AE"
+                action_emoji = "⏸️"
+                action_title = "TUNGGU"
+
+            action_html = "".join(f'<li style="margin-bottom: 6px;">{item}</li>' for item in action_items)
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid {action_color}44;
+                border-radius: 14px; padding: 20px; margin: 1rem 0; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <span style="font-size: 1.2rem;">{action_emoji}</span>
+                    <span style="color: {action_color}; font-size: 1rem; font-weight: 700;">Langkah Selanjutnya</span>
+                    <span style="background: {action_color}22; color: {action_color}; padding: 2px 10px; border-radius: 6px;
+                        font-size: 0.75rem; font-weight: 600; border: 1px solid {action_color}44;">
+                        {action_title}
+                    </span>
+                </div>
+                <ul style="color: #B0BEC5; margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6;">
+                    {action_html}
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
 
             st.divider()
 
@@ -1112,32 +1250,34 @@ def render_analysis():
         jkse = cached_jkse()
         rs = risk_scenario_analysis(df_stock, jkse) if jkse is not None else {"beta": None, "scenarios": []}
 
+        # Load fundamental data for this ticker
+        fundamental_df = cached_fundamental()
+        fund_data = {}
+        if ticker in fundamental_df.index:
+            fund_data = fundamental_df.loc[ticker].to_dict()
+
         # ── Interpretation Section ──
         if valid:
-            interp = generate_interpretation(full, setup, da, mta, vp, tl, rs, patterns, meta)
+            interp = generate_interpretation(full, setup, da, mta, vp, tl, rs, patterns, meta, fund_data)
             st.markdown("""
             <div style="background: linear-gradient(135deg, #1a1f2e 0%, #16192a 100%); border: 1px solid rgba(255,255,255,0.06);
-                border-radius: 14px; padding: 24px; margin-bottom: 1.5rem; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
-                <h3 style="color: #ECEFF1; margin: 0 0 16px 0; font-size: 1rem;">📊 Signal Assessment</h3>
+                border-radius: 14px; padding: 12px; margin-bottom: 0.5rem; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <h3 style="color: #ECEFF1; margin: 0 0 8px 0; font-size: 0.95rem;">📊 Analisa Signal</h3>
             """, unsafe_allow_html=True)
 
             for line in interp.split("\n"):
-                if line.startswith("TREND:"):
+                if line.startswith("KONDISI HARGA:"):
                     st.markdown(f"**📈 {line}**")
                 elif line.startswith("VOLUME:"):
                     st.markdown(f"**📊 {line}**")
-                elif line.startswith("PATTERN:"):
+                elif line.startswith("POLA:"):
                     st.markdown(f"**🕯️ {line}**")
-                elif line.startswith("RISK:"):
+                elif line.startswith("FUNDAMENTAL:"):
+                    st.markdown(f"**💼 {line}**")
+                elif line.startswith("RISIKO:"):
                     st.markdown(f"**⚠️ {line}**")
-                elif line.startswith("ACTION:"):
-                    # Color code the action
-                    if "Ready to enter" in line or "BUY" in line:
-                        st.markdown(f"**✅ {line}**")
-                    elif "Wait" in line:
-                        st.markdown(f"**⏳ {line}**")
-                    else:
-                        st.markdown(f"**{line}**")
+                elif line.startswith("LANGKAH SELANJUTNYA:"):
+                    st.markdown(f"**✅ {line}**")
                 elif line.startswith("  •"):
                     st.markdown(f"{line}")
                 elif line.strip():

@@ -23,9 +23,9 @@ from lightgbm import LGBMRegressor, LGBMClassifier
 
 import optuna
 
-from screener_v2.rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
-from screener_v2.rl.tabnet_config import TABNET_CONFIGS
-from screener_v2.utils.date_utils import normalize_screen_date
+from rl.extract_features import FEATURE_COLUMNS, CATEGORICAL_COLUMNS
+from rl.tabnet_config import TABNET_CONFIGS
+from utils.date_utils import normalize_screen_date
 
 warnings.filterwarnings("ignore", category=UserWarning)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -159,6 +159,9 @@ def prepare_features(df, encoders=None, fit=False):
 
     X = X.fillna(0)
     X = X.replace([np.inf, -np.inf], 0)
+    # Clip extreme values to prevent XGBoost errors
+    numeric_cols = X.select_dtypes(include=[np.number]).columns
+    X[numeric_cols] = X[numeric_cols].clip(-1e10, 1e10)
 
     return X, encoders
 

@@ -8,7 +8,7 @@ print("  RL TOP-PICK TRAINING PIPELINE")
 print("=" * 60)
 
 print("\n[0/4] Clearing old backtest data...")
-from screener_v2.performance.journal import clear_backtest_data
+from performance.journal import clear_backtest_data
 clear_backtest_data()
 
 print("\n[1/4] Running backtest (10 years)...")
@@ -25,14 +25,14 @@ if result.returncode != 0:
     sys.exit(1)
 
 print("\n[2/4] Extracting features...")
-from screener_v2.rl.extract_features import extract_training_data
+from rl.extract_features import extract_training_data
 df = extract_training_data()
 if df is None or df.empty:
     print("  No training data extracted.")
     sys.exit(1)
 
 print(f"\n[3/4] Training ranker model...")
-from screener_v2.rl.train_ranker import train_ranker
+from rl.train_ranker import train_ranker
 ranker, classifier, encoders, metrics = train_ranker(df)
 
 print(f"\n[4/4] Training complete!")

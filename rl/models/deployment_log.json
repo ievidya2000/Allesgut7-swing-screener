@@ -5,5 +5,33 @@
     "version": 1,
     "auc": 0.8028,
     "reason": "Manual deployment"
+  },
+  {
+    "timestamp": "2026-06-27T10:47:29.604692",
+    "action": "deploy",
+    "version": 2,
+    "auc": 0.772,
+    "reason": "CV AUC 77.2% (>30% threshold, full dataset)"
+  },
+  {
+    "timestamp": "2026-06-29T08:51:30.214168",
+    "action": "skip",
+    "version": 0,
+    "auc": 0.7683690008968316,
+    "reason": "New AUC 0.7684 < 0.8106 (need 5.0% improvement)"
+  },
+  {
+    "timestamp": "2026-06-29T09:09:03.119680",
+    "action": "deploy",
+    "version": 3,
+    "auc": 0.7683690008968316,
+    "reason": "Manual deployment"
+  },
+  {
+    "timestamp": "2026-06-29T09:31:24.064630",
+    "action": "skip",
+    "version": 0,
+    "auc": 0.7685138103818526,
+    "reason": "New AUC 0.7685 < 0.8068 (need 5.0% improvement)"
   }
 ]

@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
-from screener_v2.config import TICKERS, MAX_POSITIONS, INITIAL_CAPITAL, ADX_THRESHOLD
-from screener_v2.data import get_all_market_data, get_jkse_data
-from screener_v2.signals import determine_market_regime
-from screener_v2.adaptive.config import (
+from config import TICKERS, MAX_POSITIONS, INITIAL_CAPITAL, ADX_THRESHOLD
+from data import get_all_market_data, get_jkse_data
+from signals import determine_market_regime
+from adaptive.config import (
     save_adaptive_config, DEFAULT_CONFIG,
     load_adaptive_config, save_to_history, get_latest_history, has_config_changed
 )
@@ -26,6 +26,12 @@ class ParameterOptimizer:
             "sl_multiplier": [1.2, 1.5, 2.0],
             "donchian_period": [15, 20, 25],
             "volume_ma_period": [15, 20, 25],
+            "rsi_period": [10, 14, 20],
+            "rsi_oversold": [25, 30, 35],
+            "stoch_k": [10, 14, 20],
+            "stoch_oversold": [15, 20, 25],
+            "entry_zone_max_atr": [0.5, 0.75, 1.0],
+            "entry_zone_max_pct": [0.03, 0.04, 0.05],
         }
 
         self.results = []
@@ -47,7 +53,7 @@ class ParameterOptimizer:
         return precomputed
 
     def _scan_from_precomputed(self, precomputed, signal_date, market_regime, params):
-        from screener_v2.signals import determine_stock_regime, classify_setup_state
+        from signals import determine_stock_regime, classify_setup_state
         from risk import calculate_tp_sl
 
         results = []
@@ -404,6 +410,8 @@ class ParameterOptimizer:
         key_params = [
             "supertrend_multiplier", "adx_threshold", "rr1",
             "sl_multiplier", "donchian_period", "volume_ma_period",
+            "rsi_period", "rsi_oversold", "stoch_k", "stoch_oversold",
+            "entry_zone_max_atr", "entry_zone_max_pct",
         ]
 
         for param in key_params:
@@ -467,7 +475,8 @@ class ParameterOptimizer:
 
         current_config = load_adaptive_config()
         print(f"\n  Current adaptive config:")
-        for key in ["supertrend_multiplier", "adx_threshold", "rr1", "sl_multiplier"]:
+        for key in ["supertrend_multiplier", "adx_threshold", "rr1", "sl_multiplier",
+                     "rsi_period", "rsi_oversold", "stoch_k", "stoch_oversold"]:
             print(f"    {key}: {current_config.get(key, 'N/A')}")
 
         optimization_windows = []
@@ -548,7 +557,9 @@ class ParameterOptimizer:
             )
 
             print(f"\n  NEW PARAMETERS APPLIED:")
-            for key in ["supertrend_multiplier", "adx_threshold", "rr1", "sl_multiplier"]:
+            for key in ["supertrend_multiplier", "adx_threshold", "rr1", "sl_multiplier",
+                         "rsi_period", "rsi_oversold", "stoch_k", "stoch_oversold",
+                         "entry_zone_max_atr", "entry_zone_max_pct"]:
                 old_val = current_config.get(key)
                 new_val = best_overall_config.get(key)
                 changed = " ← CHANGED" if old_val != new_val else ""

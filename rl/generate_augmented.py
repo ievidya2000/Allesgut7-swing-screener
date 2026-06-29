@@ -1,14 +1,15 @@
+import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from screener_v2.config import TICKERS, SIGNAL_MAP
-from screener_v2.data import get_all_market_data, get_jkse_data
-from screener_v2.indicators import calculate_full_indicators
-from screener_v2.signals import determine_market_regime, determine_stock_regime, classify_setup_state
-from screener_v2.risk import calculate_tp_sl
-from screener_v2.analysis import generate_deep_analysis
-from screener_v2.adaptive.config import load_adaptive_config
-from screener_v2.utils.date_utils import normalize_screen_date
+from config import TICKERS, SIGNAL_MAP
+from data import get_all_market_data, get_jkse_data
+from indicators import calculate_full_indicators
+from signals import determine_market_regime, determine_stock_regime, classify_setup_state
+from risk import calculate_tp_sl
+from analysis import generate_deep_analysis
+from adaptive.config import load_adaptive_config
+from utils.date_utils import normalize_screen_date
 
 
 def _parse_prob(val):
@@ -67,7 +68,7 @@ def run_augmented_screening(market_data, signal_date, market_regime=None, jkse_d
 
             analysis = generate_deep_analysis(full, setup, close, atr, adaptive_params)
 
-            from screener_v2.risk import simulate_tp_sl_probability
+            from risk import simulate_tp_sl_probability
             prob = simulate_tp_sl_probability(
                 df_slice, close,
                 analysis["sl_normal"], analysis["tp1"], analysis["tp2"], analysis["tp3"]
@@ -138,7 +139,10 @@ def _extract_indicator_features(full, last, analysis, market_regime, stock_regim
     def _safe(val, default=0.0):
         if val is None or pd.isna(val):
             return default
-        return float(val)
+        v = float(val)
+        if np.isinf(v) or abs(v) > 1e10:
+            return default
+        return v
 
     features = {
         "adx": _safe(last.get("adx")),
@@ -165,6 +169,20 @@ def _extract_indicator_features(full, last, analysis, market_regime, stock_regim
         "close": _safe(last.get("Close")),
         "market_regime": market_regime,
         "stock_regime": stock_regime,
+        # Volume Pressure features
+        "obv_rising": 1 if last.get("obv_rising") else 0,
+        "ad_rising": 1 if last.get("ad_rising") else 0,
+        "delta_positive": 1 if last.get("delta_positive") else 0,
+        "volume_delta": np.clip(_safe(last.get("volume_delta")), -1e9, 1e9),
+        # Momentum Oscillator features
+        "rsi": _safe(last.get("rsi")),
+        "rsi_oversold": 1 if last.get("rsi_oversold") else 0,
+        "stoch_k": _safe(last.get("stoch_k")),
+        "stoch_oversold": 1 if last.get("stoch_oversold") else 0,
+        "macd_histogram": _safe(last.get("macd_histogram")),
+        "macd_bullish_cross": 1 if last.get("macd_bullish_cross") else 0,
+        "rsi_bullish_div": 1 if last.get("rsi_bullish_div") else 0,
+        "macd_bullish_div": 1 if last.get("macd_bullish_div") else 0,
     }
 
     ez = analysis.get("entry_zone", {})

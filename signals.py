@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from screener_v2.config import ADX_THRESHOLD, FRESH_SIGNAL_BARS
-from screener_v2.indicators import (
+from config import ADX_THRESHOLD, FRESH_SIGNAL_BARS
+from indicators import (
     get_ichimoku, get_supertrend, get_adx, rma
 )
 
@@ -55,9 +55,10 @@ def detect_pre_breakout(full_df, adx_threshold=None):
         last.get('volume_pre_breakout', False),
         last.get('supertrend_bullish', False),
         last.get('adx', 0) > adx_threshold,
+        last.get('rsi', 50) > 50,  # momentum naik
     ]
     score = sum(conditions)
-    valid = score >= 4
+    valid = score >= 5
     return valid, score
 
 
@@ -81,12 +82,26 @@ def detect_accumulation(full_df):
     else:
         vol_rising = False
 
+    # Volume Pressure: check if money is flowing in during consolidation
+    ad_rising = last.get('ad_rising', False)
+    delta_positive = last.get('delta_positive', False)
+    obv_rising = last.get('obv_rising', False)
+
+    # Strong accumulation: volume rising + money flowing in
+    accumulation_pressure = vol_rising and (ad_rising or delta_positive or obv_rising)
+
+    # Momentum oversold confirmation
+    rsi_oversold = last.get('rsi_oversold', False)
+    stoch_oversold = last.get('stoch_oversold', False)
+    momentum_oversold = rsi_oversold or stoch_oversold
+
     conditions = [
         price_range_tight,
         adx_low,
         st_bullish,
         price_in_cloud,
-        vol_rising,
+        accumulation_pressure,
+        momentum_oversold,
     ]
     score = sum(conditions)
     valid = score >= 3
@@ -113,15 +128,29 @@ def detect_early_reversal(full_df):
 
     adx_low = last.get('adx', 100) < 20
 
+    # Leading: RSI/MACD divergence (alternative to SuperTrend flip)
+    rsi_bull_div = last.get('rsi_bullish_div', False)
+    macd_bull_div = last.get('macd_bullish_div', False)
+    rsi_oversold = last.get('rsi_oversold', False)
+    stoch_bull_cross = last.get('stoch_bullish_cross', False)
+    macd_bull_cross = last.get('macd_bullish_cross', False)
+
+    # Divergence signal (can trigger without SuperTrend flip)
+    divergence_signal = (rsi_bull_div or macd_bull_div) and (rsi_oversold or stoch_bull_cross or macd_bull_cross)
+
+    # Original: SuperTrend flip required
+    # New: OR divergence signal detected
+    reversal_signal = fresh_st_flip or divergence_signal
+
     conditions = [
-        fresh_st_flip,
+        reversal_signal,
         vol_spike,
         higher_low,
         below_cloud,
         adx_low,
     ]
     score = sum(conditions)
-    valid = fresh_st_flip and (score >= 2)
+    valid = reversal_signal and (score >= 2)
     return valid, score
 
 
@@ -141,6 +170,7 @@ def detect_fresh_breakout(full_df, adx_threshold=None):
         last.get('volume_expanding', False),
         last.get('supertrend_bullish', False),
         last.get('adx', 0) > adx_threshold,
+        last.get('macd_bullish_cross', False) or last.get('macd_histogram', 0) > 0,  # MACD confirmation
     ]
     score = sum(conditions)
     valid = conditions[0] and score >= 3
@@ -173,10 +203,15 @@ def detect_vcp(full_df):
 
     adx_low = last.get('adx', 100) < 20
 
+    # Leading: momentum oversold before expansion
+    stoch_oversold = last.get('stoch_oversold', False)
+    rsi_low = last.get('rsi', 50) < 45
+    momentum_ready = stoch_oversold or rsi_low
+
     conditions = [vol_contracting, dw_near_min, multiple_contractions,
-                  pullback_shallower, above_ma20, adx_low]
+                  pullback_shallower, above_ma20, adx_low, momentum_ready]
     score = sum(conditions)
-    valid = score >= 4
+    valid = score >= 3
     return valid, score
 
 
@@ -203,8 +238,12 @@ def detect_tight_base_breakout(full_df):
 
     st_bull = last.get('supertrend_bullish', False)
 
+    # Leading: RSI netral = siap breakout
+    rsi = last.get('rsi', 50)
+    rsi_neutral = 40 <= rsi <= 60
+
     conditions = [tight_range, dw_tight, has_inside_bars, adx_low,
-                  vol_dry, st_bull]
+                  vol_dry, st_bull, rsi_neutral]
     score = sum(conditions)
     valid = score >= 4
     return valid, score
@@ -232,10 +271,14 @@ def detect_base_on_base(full_df):
 
     st_bull = last.get('supertrend_bullish', False)
 
+    # Leading: momentum confirmation
+    rsi_healthy = last.get('rsi', 0) > 40
+    macd_positive = last.get('macd_histogram', 0) > 0
+
     conditions = [current_tight, prev_tight_zone, broke_first_base,
-                  higher_base, vol_contracting, st_bull]
+                  higher_base, vol_contracting, st_bull, rsi_healthy, macd_positive]
     score = sum(conditions)
-    valid = score >= 4
+    valid = score >= 6
     return valid, score
 
 
@@ -268,10 +311,13 @@ def detect_bull_flag(full_df):
 
     close_near_top = (recent_high - last['Close']) / recent_high < 0.03 if recent_high > 0 else False
 
+    # Leading: momentum masih hidup di flag
+    rsi_healthy = last.get('rsi', 0) > 40
+
     conditions = [strong_pole, shallow_flag, reasonable_duration,
-                  vol_declining, above_ma20, st_bull, close_near_top]
+                  vol_declining, above_ma20, st_bull, close_near_top, rsi_healthy]
     score = sum(conditions)
-    valid = score >= 5
+    valid = score >= 4
     return valid, score
 
 
@@ -298,10 +344,15 @@ def detect_pullback_ma20(full_df):
     high_20d = tail['High'].max() if len(tail) >= 10 else last['Close']
     had_prior_strength = high_20d > ma20 * 1.03
 
+    # Leading: oversold di MA20 = entry lebih awal
+    rsi_oversold = last.get('rsi_oversold', False)
+    stoch_bull_cross = last.get('stoch_bullish_cross', False)
+    momentum_bounce = rsi_oversold or stoch_bull_cross
+
     conditions = [ma20_rising, ma_order, near_ma20, touched_ma20,
-                  bounce, had_prior_strength]
+                  bounce, had_prior_strength, momentum_bounce]
     score = sum(conditions)
-    valid = score >= 4
+    valid = score >= 3
     return valid, score
 
 
@@ -316,7 +367,7 @@ def classify_setup_state(full_df, stock_regime, custom_params=None):
 
     # 2. VCP (Volatility Contraction Pattern)
     vcp_valid, vcp_score = detect_vcp(full_df)
-    if vcp_valid and stock_regime != "BEAR":
+    if vcp_valid:  # No regime filter - VCP can occur in SIDEWAYS
         return "VCP", True
 
     # 3. TIGHT_BASE_BREAKOUT
@@ -326,22 +377,22 @@ def classify_setup_state(full_df, stock_regime, custom_params=None):
 
     # 4. BASE_ON_BASE
     bob_valid, bob_score = detect_base_on_base(full_df)
-    if bob_valid and stock_regime == "BULL":
+    if bob_valid and stock_regime != "BEAR":  # Changed from BULL to not BEAR
         return "BASE_ON_BASE", True
 
     # 5. BULL_FLAG
     bf_valid, bf_score = detect_bull_flag(full_df)
-    if bf_valid and stock_regime != "BEAR":
+    if bf_valid:  # No regime filter - BULL_FLAG can occur in SIDEWAYS
         return "BULL_FLAG", True
 
     # 6. Fresh BREAKOUT
     fb_valid, fb_score = detect_fresh_breakout(full_df, adx_thresh)
-    if fb_valid and stock_regime == "BULL":
+    if fb_valid and stock_regime != "BEAR":  # Changed from BULL to not BEAR
         return "BREAKOUT", True
 
     # 7. PULLBACK_MA20
     pb20_valid, pb20_score = detect_pullback_ma20(full_df)
-    if pb20_valid and stock_regime == "BULL":
+    if pb20_valid and stock_regime != "BEAR":  # Changed from BULL to not BEAR
         return "PULLBACK_MA20", True
 
     # 8. ACCUMULATION

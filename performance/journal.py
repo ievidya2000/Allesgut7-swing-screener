@@ -279,31 +279,39 @@ def log_trade_result(data):
 
 def get_trade_results(filters=None):
     conn = _get_conn()
-    query = "SELECT * FROM trade_results"
+    query = """
+        SELECT tr.*, p.setup, p.signal, p.timing, p.score,
+               p.market_regime, p.stock_regime, p.adx, p.atr
+        FROM trade_results tr
+        JOIN predictions p ON tr.prediction_id = p.id
+    """
     params = []
     conditions = []
 
     if filters:
         if "status" in filters:
-            conditions.append("status = ?")
+            conditions.append("tr.status = ?")
             params.append(filters["status"])
         if "ticker" in filters:
-            conditions.append("ticker = ?")
+            conditions.append("tr.ticker = ?")
             params.append(filters["ticker"])
         if "exit_reason" in filters:
-            conditions.append("exit_reason = ?")
+            conditions.append("tr.exit_reason = ?")
             params.append(filters["exit_reason"])
+        if "setup" in filters:
+            conditions.append("p.setup = ?")
+            params.append(filters["setup"])
         if "from_date" in filters:
-            conditions.append("entry_date >= ?")
+            conditions.append("tr.entry_date >= ?")
             params.append(filters["from_date"])
         if "to_date" in filters:
-            conditions.append("entry_date <= ?")
+            conditions.append("tr.entry_date <= ?")
             params.append(filters["to_date"])
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    query += " ORDER BY entry_date DESC"
+    query += " ORDER BY tr.entry_date DESC"
     rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
 

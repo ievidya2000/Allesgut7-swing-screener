@@ -2,9 +2,9 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 
-from screener_v2.performance.journal import init_db, get_all_predictions, get_trade_results, get_journal_summary
-from screener_v2.performance.metrics import full_report, format_report
-from screener_v2.utils.date_utils import safe_screen_date_str
+from performance.journal import init_db, get_all_predictions, get_trade_results, get_journal_summary
+from performance.metrics import full_report, format_report
+from utils.date_utils import safe_screen_date_str
 
 
 def cmd_backtest(args):

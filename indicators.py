@@ -1,13 +1,16 @@
 import numpy as np
 import pandas as pd
 
-from screener_v2.config import (
+from config import (
     ICHIMOKU_TENKAN, ICHIMOKU_KIJUN, ICHIMOKU_SENKOU_B,
     DONCHIAN_PERIOD, ATR_LENGTH, ATR_MULTIPLIER,
     ADX_LENGTH, AVWAP_LOOKBACK, VOLUME_MA_PERIOD,
     ATR_PERIOD_RM, ATR_CONTRACTION_SHORT, ATR_CONTRACTION_LONG,
     VOL_MA_SHORT, VOLUME_RISING_LOOKBACK, FRESH_SIGNAL_BARS,
-    RESISTANCE_ATR_MULTIPLIER, VOL_CONTRACTION_THRESHOLD
+    RESISTANCE_ATR_MULTIPLIER, VOL_CONTRACTION_THRESHOLD,
+    OBV_MA_PERIOD, DELTA_MA_PERIOD,
+    RSI_PERIOD, MACD_FAST, MACD_SLOW, MACD_SIGNAL,
+    STOCH_K, STOCH_D, STOCH_SMOOTH, ELLIOTT_SWING_LOOKBACK
 )
 
 
@@ -167,6 +170,11 @@ def get_avwap(high, low, close, volume, supertrend_bullish, lookback=AVWAP_LOOKB
     pivot_low_vals = pivot_low_detected.values if hasattr(pivot_low_detected, 'values') else np.array(pivot_low_detected)
     pivot_high_vals = pivot_high_detected.values if hasattr(pivot_high_detected, 'values') else np.array(pivot_high_detected)
 
+    # Ensure boolean type (handle NaN from rolling operations)
+    bull_vals = np.asarray(bull_vals, dtype=bool)
+    pivot_low_vals = np.nan_to_num(pivot_low_vals, nan=False).astype(bool)
+    pivot_high_vals = np.nan_to_num(pivot_high_vals, nan=False).astype(bool)
+
     # Determine anchor indices
     anchor_mask = (bull_vals & pivot_low_vals) | (~bull_vals & pivot_high_vals)
     anchor_indices = np.where(anchor_mask, np.maximum(0, np.arange(n) - lookback), -1)
@@ -191,6 +199,155 @@ def get_avwap(high, low, close, volume, supertrend_bullish, lookback=AVWAP_LOOKB
             avwap[i] = cum_tp_vol / cum_vol
 
     return pd.Series(avwap, index=close.index)
+
+
+def get_obv(close, volume):
+    """On-Balance Volume: cumulative volume weighted by price direction."""
+    direction = np.where(close > close.shift(1), 1,
+                np.where(close < close.shift(1), -1, 0))
+    direction = pd.Series(direction, index=close.index)
+    obv = (volume * direction).cumsum()
+    return obv
+
+
+def get_ad_line(high, low, close, volume):
+    """Accumulation/Distribution Line: cumulative volume weighted by close position in range."""
+    hl_range = (high - low).replace(0, 1)
+    clv = ((close - low) - (high - close)) / hl_range
+    ad = (clv * volume).cumsum()
+    return ad
+
+
+def get_volume_delta(high, low, close, volume):
+    """Estimate buying vs selling volume based on close position in range."""
+    hl_range = (high - low).replace(0, 1)
+    buy_vol = volume * (close - low) / hl_range
+    sell_vol = volume * (high - close) / hl_range
+    delta = buy_vol - sell_vol
+    return buy_vol, sell_vol, delta
+
+
+def get_rsi(close, period=None):
+    """Relative Strength Index using RMA smoothing."""
+    period = period or RSI_PERIOD
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = (-delta).where(delta < 0, 0.0)
+    avg_gain = rma(gain, period)
+    avg_loss = rma(loss, period)
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.fillna(100)  # If no losses, RSI = 100
+    return rsi
+
+
+def get_macd(close, fast=None, slow=None, signal_period=None):
+    """MACD: line, signal, histogram."""
+    fast = fast or MACD_FAST
+    slow = slow or MACD_SLOW
+    signal_period = signal_period or MACD_SIGNAL
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def get_stochastic(high, low, close, k_period=None, d_period=None, smooth=None):
+    """Stochastic Oscillator: %K and %D."""
+    k_period = k_period or STOCH_K
+    d_period = d_period or STOCH_D
+    smooth = smooth or STOCH_SMOOTH
+    lowest_low = low.rolling(window=k_period).min()
+    highest_high = high.rolling(window=k_period).max()
+    hl_range = (highest_high - lowest_low).replace(0, 1)
+    fast_k = 100 * (close - lowest_low) / hl_range
+    slow_k = fast_k.rolling(window=smooth).mean()
+    slow_d = slow_k.rolling(window=d_period).mean()
+    return slow_k, slow_d
+
+
+def get_elliott_wave(high, low, close, lookback=None):
+    """Simple Elliott Wave detection: find swing highs/lows and estimate wave position."""
+    lookback = lookback or ELLIOTT_SWING_LOOKBACK
+    n = len(close)
+    
+    # Find swing highs and lows
+    swing_highs = []
+    swing_lows = []
+    for i in range(lookback, n - lookback):
+        if high.iloc[i] == high.iloc[i-lookback:i+lookback+1].max():
+            swing_highs.append((i, high.iloc[i]))
+        if low.iloc[i] == low.iloc[i-lookback:i+lookback+1].min():
+            swing_lows.append((i, low.iloc[i]))
+    
+    # Get last 5 pivots (mix of highs and lows)
+    pivots = [(idx, price, 'H') for idx, price in swing_highs] + \
+             [(idx, price, 'L') for idx, price in swing_lows]
+    pivots.sort(key=lambda x: x[0])
+    pivots = pivots[-5:] if len(pivots) >= 5 else pivots
+    
+    # Estimate wave position based on pivot pattern
+    # For simplicity: count how many swings we've seen
+    wave_position = len(pivots) % 5 + 1  # 1-5 for impulse
+    if len(pivots) >= 3:
+        last3 = pivots[-3:]
+        # Check if corrective (A-B-C pattern: down-up-down or up-down-up)
+        if last3[0][2] == 'L' and last3[1][2] == 'H' and last3[2][2] == 'L':
+            wave_position = 'B'  # Corrective wave B
+        elif last3[0][2] == 'H' and last3[1][2] == 'L' and last3[2][2] == 'H':
+            wave_position = 'C'  # Corrective wave C
+    
+    # Fibonacci levels from last swing range
+    if len(pivots) >= 2:
+        last_high = max(p for _, p, _ in pivots)
+        last_low = min(p for _, p, _ in pivots)
+        fib_range = last_high - last_low
+        fib_382 = last_high - fib_range * 0.382
+        fib_500 = last_high - fib_range * 0.500
+        fib_618 = last_high - fib_range * 0.618
+        fib_786 = last_high - fib_range * 0.786
+    else:
+        fib_382 = fib_500 = fib_618 = fib_786 = close.iloc[-1]
+    
+    return wave_position, fib_382, fib_500, fib_618, fib_786
+
+
+def detect_divergence(price, indicator, lookback=20):
+    """Detect bullish/bearish divergence between price and indicator."""
+    n = len(price)
+    if n < lookback:
+        return False, False
+    
+    tail_price = price.tail(lookback)
+    tail_ind = indicator.tail(lookback)
+    
+    # Find 2 lowest points in price
+    price_arr = tail_price.values
+    ind_arr = tail_ind.values
+    
+    # Split into two halves for comparison
+    half = lookback // 2
+    first_half_price = price_arr[:half]
+    second_half_price = price_arr[half:]
+    first_half_ind = ind_arr[:half]
+    second_half_ind = ind_arr[half:]
+    
+    if len(first_half_price) == 0 or len(second_half_price) == 0:
+        return False, False
+    
+    # Bullish divergence: price lower low, indicator higher low
+    price_lower = np.nanmin(second_half_price) < np.nanmin(first_half_price)
+    ind_higher = np.nanmin(second_half_ind) > np.nanmin(first_half_ind)
+    bullish_div = price_lower and ind_higher
+    
+    # Bearish divergence: price higher high, indicator lower high
+    price_higher = np.nanmax(second_half_price) > np.nanmax(first_half_price)
+    ind_lower = np.nanmax(second_half_ind) < np.nanmax(first_half_ind)
+    bearish_div = price_higher and ind_lower
+    
+    return bullish_div, bearish_div
 
 
 def calculate_full_indicators(df, custom_params=None):
@@ -236,6 +393,18 @@ def calculate_full_indicators(df, custom_params=None):
     df['vol_ma'] = v.rolling(window=vol_ma_p).mean()
     df['volume_expanding'] = v > df['vol_ma']
     df['vol_ma_ratio'] = v / df['vol_ma'].replace(0, 1)
+
+    # Volume Pressure: OBV, A/D Line, Volume Delta
+    df['obv'] = get_obv(c, v)
+    df['obv_ma'] = df['obv'].rolling(window=OBV_MA_PERIOD).mean()
+    df['obv_rising'] = df['obv'] > df['obv'].shift(5)
+
+    df['ad_line'] = get_ad_line(h, l, c, v)
+    df['ad_rising'] = df['ad_line'] > df['ad_line'].shift(5)
+
+    df['buy_volume'], df['sell_volume'], df['volume_delta'] = get_volume_delta(h, l, c, v)
+    df['delta_ma'] = df['volume_delta'].rolling(window=DELTA_MA_PERIOD).mean()
+    df['delta_positive'] = df['volume_delta'] > 0
 
     # ATR Risk Management
     df['atr_rm'] = get_atr(h, l, c, ATR_PERIOD_RM)
@@ -291,5 +460,48 @@ def calculate_full_indicators(df, custom_params=None):
 
     # --- ATR Slope (for VCP) ---
     df['atr_10_slope'] = df['atr_10'].diff(3) / df['atr_10'].shift(3)
+
+    # --- RSI ---
+    df['rsi'] = get_rsi(c)
+    df['rsi_oversold'] = df['rsi'] < 30
+    df['rsi_overbought'] = df['rsi'] > 70
+
+    # --- MACD ---
+    df['macd_line'], df['macd_signal'], df['macd_histogram'] = get_macd(c)
+    df['macd_bullish_cross'] = (df['macd_histogram'] > 0) & (df['macd_histogram'].shift(1) <= 0)
+    df['macd_bearish_cross'] = (df['macd_histogram'] < 0) & (df['macd_histogram'].shift(1) >= 0)
+
+    # --- Stochastic ---
+    df['stoch_k'], df['stoch_d'] = get_stochastic(h, l, c)
+    df['stoch_oversold'] = df['stoch_k'] < 20
+    df['stoch_overbought'] = df['stoch_k'] > 80
+    df['stoch_bullish_cross'] = (df['stoch_k'] > df['stoch_d']) & (df['stoch_k'].shift(1) <= df['stoch_d'].shift(1))
+
+    # --- Elliott Wave ---
+    wave_pos, fib_382, fib_500, fib_618, fib_786 = get_elliott_wave(h, l, c)
+    df['wave_position'] = wave_pos
+    df['fib_382'] = fib_382
+    df['fib_500'] = fib_500
+    df['fib_618'] = fib_618
+    df['fib_786'] = fib_786
+
+    # --- Divergence Detection ---
+    rsi_bull_div, rsi_bear_div = detect_divergence(c, df['rsi'])
+    df['rsi_bullish_div'] = rsi_bull_div
+    df['rsi_bearish_div'] = rsi_bear_div
+
+    macd_bull_div, macd_bear_div = detect_divergence(c, df['macd_histogram'])
+    df['macd_bullish_div'] = macd_bull_div
+    df['macd_bearish_div'] = macd_bear_div
+
+    # --- OBV Crossover (activate unused feature) ---
+    df['obv_above_ma'] = df['obv'] > df['obv_ma']
+    df['obv_cross_up'] = df['obv_above_ma'] & ~df['obv_above_ma'].shift(1).fillna(False)
+
+    # --- A/D Line acceleration ---
+    df['ad_acceleration'] = df['ad_line'].diff(3)
+
+    # --- Donchian Breakdown (activate unused feature) ---
+    # Already computed as 'donchian_breakdown' in get_donchian()
 
     return df
