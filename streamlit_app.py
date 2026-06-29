@@ -366,7 +366,8 @@ def cached_run_screener(market_data_hash, market_regime):
                 "Entry Strategy": entry_zone["strategy"],
                 "Timing": analysis["timing"]["label"],
                 "Timing Detail": analysis["timing"]["detail"],
-                "Timing Target Price": analysis["timing"].get("target_price"),
+                "Timing Confirm Type": analysis["timing"].get("confirmation_type", ""),
+                "Timing Confirm Value": analysis["timing"].get("confirmation_value"),
                 "Chart": analysis["chart"],
                 "Score": 0,
                 "BearFiltered": is_bear_filtered,
@@ -833,7 +834,7 @@ def render_results():
         "Profit %", "Risk %",
         "Prob_TP1", "Prob_TP2", "Prob_TP3", "Prob_SL",
         "Avg Days TP1", "Avg Days TP2", "Avg Days TP3",
-        "Timing", "Timing Target Price", "ADX",
+        "Timing", "Timing Confirm Type", "Timing Confirm Value", "ADX",
     ]
     avail_cols = [c for c in CSV_COLS if c in export_df.columns]
     export_df = export_df[avail_cols].sort_values("Score", ascending=False)

@@ -152,7 +152,8 @@ def run_screener():
                 "SL Wide": sl_wide["price"],
                 "Timing": timing["label"],
                 "Timing Detail": timing["detail"],
-                "Timing Target Price": timing.get("target_price"),
+                "Timing Confirm Type": timing.get("confirmation_type", ""),
+                "Timing Confirm Value": timing.get("confirmation_value"),
                 "Chart": chart,
             }
 
@@ -279,7 +280,7 @@ def run_screener():
         "Profit %", "Risk %",
         "Prob(TP1)", "Prob(TP2)", "Prob(TP3)", "Prob(SL)",
         "Avg Days TP1", "Avg Days TP2", "Avg Days TP3",
-        "Timing", "Timing Target Price",
+        "Timing", "Timing Confirm Type", "Timing Confirm Value",
     ]
     avail_cols = [c for c in save_cols if c in csv_df.columns]
     csv_df = csv_df[avail_cols].sort_values("Score" if "Score" in csv_df.columns else avail_cols[0], ascending=False)

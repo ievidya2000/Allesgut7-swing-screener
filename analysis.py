@@ -398,18 +398,24 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"Siap masuk! Volume naik, harga di atas tengah, RSI {rsi:.0f}",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif vol_ok and above_mid:
             return {
                 "label": "WAIT_MOMENTUM",
                 "detail": f"Volume OK, harga OK, tapi RSI {rsi:.0f} < 50. Tunggu momentum naik",
                 "target_price": None,
+                "confirmation_type": "RSI",
+                "confirmation_value": 50,
             }
         elif vol_ok:
             return {
                 "label": "WAIT_PRICE",
                 "detail": f"Tunggu harga naik di atas {don_mid:.0f}",
                 "target_price": don_mid,
+                "confirmation_type": "Price",
+                "confirmation_value": don_mid,
             }
         else:
             vol_ma = last.get('volume_ma', 0)
@@ -417,6 +423,8 @@ def determine_timing(full_df, setup):
                 "label": "WAIT_VOLUME",
                 "detail": f"Tunggu volume naik di atas {vol_ma:.0f}",
                 "target_price": None,
+                "confirmation_type": "Volume",
+                "confirmation_value": vol_ma,
             }
 
     elif setup == "BREAKOUT":
@@ -426,12 +434,16 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"Breakout + MACD positif! Siap masuk",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif last.get('fresh_breakout', False):
             return {
                 "label": "WAIT_MACD",
                 "detail": f"Breakout terdeteksi tapi MACD belum konfirmasi (hist: {macd_hist:.2f})",
                 "target_price": None,
+                "confirmation_type": "MACD",
+                "confirmation_value": 0,
             }
         elif last.get('donchian_breakout', False):
             don_upper = last.get('donchian_upper', 0)
@@ -439,8 +451,10 @@ def determine_timing(full_df, setup):
                 "label": "WAIT_RETEST",
                 "detail": f"Tunggu harga kembali ke {don_upper:.0f}",
                 "target_price": don_upper,
+                "confirmation_type": "Price",
+                "confirmation_value": don_upper,
             }
-        return {"label": "WAIT", "detail": "Tunggu breakout baru", "target_price": None}
+        return {"label": "WAIT", "detail": "Tunggu breakout baru", "target_price": None, "confirmation_type": "", "confirmation_value": None}
 
     elif setup == "ACCUMULATION":
         don_lower = last.get('donchian_lower', 0)
@@ -453,18 +467,24 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"Harga di batas bawah + oversold (RSI {rsi:.0f}, Stoch {stoch_k:.0f})",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif near_lower:
             return {
                 "label": "WAIT_MOMENTUM",
                 "detail": f"Harga di bawah tapi belum oversold (RSI {rsi:.0f}). Tunggu konfirmasi momentum",
                 "target_price": None,
+                "confirmation_type": "RSI",
+                "confirmation_value": 30,
             }
         else:
             return {
                 "label": "WAIT_PULLBACK",
                 "detail": f"Tunggu harga turun ke {don_lower:.0f}",
                 "target_price": don_lower,
+                "confirmation_type": "Price",
+                "confirmation_value": don_lower,
             }
 
     elif setup == "EARLY_REVERSAL":
@@ -487,17 +507,23 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"{signal_type}! Siap masuk (RSI {rsi:.0f})",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif st_bullish:
             return {
                 "label": "WAIT_PULLBACK",
                 "detail": f"Tunggu harga turun ke MA20 ({ma20:.0f})",
                 "target_price": ma20,
+                "confirmation_type": "Price",
+                "confirmation_value": ma20,
             }
         return {
             "label": "WAIT_CONFIRMATION",
             "detail": f"Tunggu konfirmasi tren berbalik naik (RSI {rsi:.0f}, Stoch {stoch_k:.0f})",
             "target_price": None,
+            "confirmation_type": "RSI",
+            "confirmation_value": 50,
         }
 
     elif setup == "VCP":
@@ -513,20 +539,26 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"Harga tenang, volume rendah, momentum siap (Stoch {stoch_k:.0f})",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif contracting and vol_low:
             return {
                 "label": "WAIT_MOMENTUM",
                 "detail": f"Kontraksi OK, volume OK, tapi Stoch {stoch_k:.0f} belum oversold",
                 "target_price": None,
+                "confirmation_type": "Stoch",
+                "confirmation_value": 20,
             }
         elif contracting:
             return {
                 "label": "WAIT_VOLUME",
                 "detail": f"Tunggu volume turun di bawah {vol_ma * 0.8:.0f}",
                 "target_price": None,
+                "confirmation_type": "Volume",
+                "confirmation_value": vol_ma * 0.8,
             }
-        return {"label": "WAIT", "detail": "Tunggu harga mulai tenang", "target_price": None}
+        return {"label": "WAIT", "detail": "Tunggu harga mulai tenang", "target_price": None, "confirmation_type": "", "confirmation_value": None}
 
     elif setup == "TIGHT_BASE_BREAKOUT":
         inside_bars = last.get('consecutive_inside', 0)
@@ -538,17 +570,23 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"{inside_bars} inside bars + RSI netral ({rsi:.0f}), siap breakout",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif breakout_ready:
             return {
                 "label": "WAIT_MOMENTUM",
                 "detail": f"Inside bars OK tapi RSI {rsi:.0f} belum netral",
                 "target_price": None,
+                "confirmation_type": "RSI",
+                "confirmation_value": 50,
             }
         return {
             "label": "WAIT",
             "detail": f"Inside bars: {inside_bars}/3 minimum",
             "target_price": None,
+            "confirmation_type": "",
+            "confirmation_value": None,
         }
 
     elif setup == "BASE_ON_BASE":
@@ -560,11 +598,15 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": "Harga di atas base, siap masuk",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         return {
             "label": "WAIT_PRICE",
             "detail": f"Tunggu harga naik di atas {don_mid:.0f}",
             "target_price": don_mid,
+            "confirmation_type": "Price",
+            "confirmation_value": don_mid,
         }
 
     elif setup == "BULL_FLAG":
@@ -578,20 +620,26 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"Harga bounce di MA20, volume rendah, RSI sehat ({rsi:.0f})",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif near_ma20 and vol_declining:
             return {
                 "label": "WAIT_MOMENTUM",
                 "detail": f"MA20 + volume OK, tapi RSI {rsi:.0f} lemah",
                 "target_price": None,
+                "confirmation_type": "RSI",
+                "confirmation_value": 40,
             }
         elif vol_declining:
             return {
                 "label": "WAIT_PULLBACK",
                 "detail": f"Tunggu harga turun ke MA20 ({ma20_val:.0f})",
                 "target_price": ma20_val,
+                "confirmation_type": "Price",
+                "confirmation_value": ma20_val,
             }
-        return {"label": "WAIT", "detail": "Tunggu flag terbentuk", "target_price": None}
+        return {"label": "WAIT", "detail": "Tunggu flag terbentuk", "target_price": None, "confirmation_type": "", "confirmation_value": None}
 
     elif setup == "PULLBACK_MA20":
         ma20 = last.get('ma20', 0)
@@ -606,22 +654,28 @@ def determine_timing(full_df, setup):
                 "label": "ENTRY_READY",
                 "detail": f"Harga bounce di MA20 + momentum oversold (RSI {rsi:.0f})",
                 "target_price": None,
+                "confirmation_type": "",
+                "confirmation_value": None,
             }
         elif near_ma20 and ma20_rising:
             return {
                 "label": "WAIT_MOMENTUM",
                 "detail": f"MA20 OK tapi RSI {rsi:.0f} belum oversold",
                 "target_price": None,
+                "confirmation_type": "RSI",
+                "confirmation_value": 30,
             }
         elif ma20_rising:
             return {
                 "label": "WAIT_PULLBACK",
                 "detail": f"Tunggu harga turun ke MA20 ({ma20:.0f})",
                 "target_price": ma20,
+                "confirmation_type": "Price",
+                "confirmation_value": ma20,
             }
-        return {"label": "WAIT", "detail": "Tunggu MA20 mulai naik", "target_price": None}
+        return {"label": "WAIT", "detail": "Tunggu MA20 mulai naik", "target_price": None, "confirmation_type": "", "confirmation_value": None}
 
-    return {"label": "HOLD", "detail": "", "target_price": None}
+    return {"label": "HOLD", "detail": "", "target_price": None, "confirmation_type": "", "confirmation_value": None}
 
 
 def generate_ascii_chart(close, entry_zone, sl_normal, sl_wide, tp_analysis, levels):
