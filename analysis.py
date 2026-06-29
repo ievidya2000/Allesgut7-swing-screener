@@ -818,6 +818,21 @@ def generate_deep_analysis(full_df, setup, close, atr_val, custom_params=None):
     tp_analysis = analyze_tp_targets(tp1, tp2, tp3, ref_price, levels)
     timing = determine_timing(full_df, setup)
 
+    # Reconcile entry strategy with timing
+    if timing["label"] == "ENTRY_READY":
+        ready_strategies = {
+            "BASE_ON_BASE": "Breakout dari base — entry zone aktif",
+            "BULL_FLAG": "Bounce di MA20 — entry zone aktif",
+            "PULLBACK_MA20": "Bounce di MA20 — entry zone aktif",
+            "ACCUMULATION": "Support + oversold — entry zone aktif",
+            "EARLY_REVERSAL": "Reversal terkonfirmasi — entry zone aktif",
+            "PRE_BREAKOUT": "Momentum naik — entry zone aktif",
+            "BREAKOUT": "Breakout terkonfirmasi — entry zone aktif",
+            "VCP": "Kontraksi selesai — entry zone aktif",
+            "TIGHT_BASE_BREAKOUT": "Base siap breakout — entry zone aktif",
+        }
+        entry_zone["strategy"] = ready_strategies.get(setup, "Entry zone aktif — siap masuk")
+
     # Recalculate profit/risk dari harga aktual
     risk_pct = abs(close - sl_normal) / close * 100
     profit_pct = abs(tp1 - close) / close * 100
