@@ -454,7 +454,8 @@ def determine_timing(full_df, setup):
                 "confirmation_type": "Price",
                 "confirmation_value": don_upper,
             }
-        return {"label": "WAIT", "detail": "Tunggu breakout baru", "target_price": None, "confirmation_type": "", "confirmation_value": None}
+        don_upper = last.get('donchian_upper', 0)
+        return {"label": "WAIT", "detail": "Tunggu breakout baru", "target_price": None, "confirmation_type": "Price", "confirmation_value": don_upper}
 
     elif setup == "ACCUMULATION":
         don_lower = last.get('donchian_lower', 0)
@@ -558,7 +559,7 @@ def determine_timing(full_df, setup):
                 "confirmation_type": "Volume",
                 "confirmation_value": vol_ma * 0.8,
             }
-        return {"label": "WAIT", "detail": "Tunggu harga mulai tenang", "target_price": None, "confirmation_type": "", "confirmation_value": None}
+        return {"label": "WAIT", "detail": "Tunggu harga mulai tenang", "target_price": None, "confirmation_type": "BB_Width", "confirmation_value": round(bb_width * 0.8, 6)}
 
     elif setup == "TIGHT_BASE_BREAKOUT":
         inside_bars = last.get('consecutive_inside', 0)
@@ -585,8 +586,8 @@ def determine_timing(full_df, setup):
             "label": "WAIT",
             "detail": f"Inside bars: {inside_bars}/3 minimum",
             "target_price": None,
-            "confirmation_type": "",
-            "confirmation_value": None,
+            "confirmation_type": "Inside_Bars",
+            "confirmation_value": 3,
         }
 
     elif setup == "BASE_ON_BASE":
@@ -639,7 +640,7 @@ def determine_timing(full_df, setup):
                 "confirmation_type": "Price",
                 "confirmation_value": ma20_val,
             }
-        return {"label": "WAIT", "detail": "Tunggu flag terbentuk", "target_price": None, "confirmation_type": "", "confirmation_value": None}
+        return {"label": "WAIT", "detail": "Tunggu flag terbentuk", "target_price": None, "confirmation_type": "Price", "confirmation_value": ma20_val}
 
     elif setup == "PULLBACK_MA20":
         ma20 = last.get('ma20', 0)
@@ -673,7 +674,7 @@ def determine_timing(full_df, setup):
                 "confirmation_type": "Price",
                 "confirmation_value": ma20,
             }
-        return {"label": "WAIT", "detail": "Tunggu MA20 mulai naik", "target_price": None, "confirmation_type": "", "confirmation_value": None}
+        return {"label": "WAIT", "detail": "Tunggu MA20 mulai naik", "target_price": None, "confirmation_type": "MA20_Slope", "confirmation_value": 0}
 
     return {"label": "HOLD", "detail": "", "target_price": None, "confirmation_type": "", "confirmation_value": None}
 
@@ -832,6 +833,24 @@ def generate_deep_analysis(full_df, setup, close, atr_val, custom_params=None):
             "TIGHT_BASE_BREAKOUT": "Base siap breakout — entry zone aktif",
         }
         entry_zone["strategy"] = ready_strategies.get(setup, "Entry zone aktif — siap masuk")
+    elif timing["label"] == "HOLD":
+        entry_zone["strategy"] = "Tidak ada aksi"
+    elif timing["confirmation_type"] and timing["confirmation_value"] is not None:
+        ct = timing["confirmation_type"]
+        cv = timing["confirmation_value"]
+        strategy_map = {
+            "Price": f"Tunggu harga sampai {cv:.0f}",
+            "RSI": f"Tunggu RSI > {cv:.0f}",
+            "Stoch": f"Tunggu Stoch < {cv:.0f}",
+            "MACD": "Tunggu MACD histogram positif",
+            "Volume": f"Tunggu volume naik di atas {cv:.0f}",
+            "BB_Width": "Tunggu BB width menyempit",
+            "Inside_Bars": f"Tunggu {cv:.0f} inside bars terbentuk",
+            "MA20_Slope": "Tunggu MA20 mulai naik",
+        }
+        entry_zone["strategy"] = strategy_map.get(ct, f"Tunggu konfirmasi {ct}")
+    else:
+        entry_zone["strategy"] = "Tunggu konfirmasi masuk"
 
     # Recalculate profit/risk dari harga aktual
     risk_pct = abs(close - sl_normal) / close * 100

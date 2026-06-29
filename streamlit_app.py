@@ -139,6 +139,8 @@ TIMING_MAP = {
     "WAIT_PULLBACK": ("🟡", "Wait for pullback"),
     "WAIT_RETEST": ("🟡", "Wait for retest"),
     "WAIT_CONFIRMATION": ("🟡", "Wait for confirmation"),
+    "WAIT_MOMENTUM": ("🟡", "Wait for momentum"),
+    "WAIT_MACD": ("🟡", "Wait for MACD"),
     "WAIT": ("🔴", "Wait"),
     "HOLD": ("⚪", "Hold"),
 }
