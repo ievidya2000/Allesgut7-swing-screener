@@ -503,6 +503,24 @@ def render_sidebar():
             </div>
             """, unsafe_allow_html=True)
 
+        # Database backend indicator
+        from performance.journal import get_db_backend, IS_POSTGRES
+        db_backend = get_db_backend()
+        if IS_POSTGRES:
+            st.markdown("""
+            <div style="background: #66BB6A15; border: 1px solid #66BB6A30; border-radius: 10px;
+                padding: 8px 16px; text-align: center; margin-bottom: 12px;">
+                <span style="color: #66BB6A; font-weight: 500; font-size: 0.8rem;">☁️ Database: PostgreSQL (persistent)</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background: #FFA72615; border: 1px solid #FFA72630; border-radius: 10px;
+                padding: 8px 16px; text-align: center; margin-bottom: 12px;">
+                <span style="color: #FFA726; font-weight: 500; font-size: 0.8rem;">💾 Database: SQLite (session only)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
         # Run button
         if st.button("🚀 Run Screener", type="primary", use_container_width=True):
             with st.spinner("Loading data..."):
