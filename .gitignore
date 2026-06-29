@@ -29,3 +29,13 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# Environment
+.env
+
+# Backup files
+*.bak
+
+# Model training artifacts
+rl/training_data.parquet
+rl/training_data.parquet.bak
