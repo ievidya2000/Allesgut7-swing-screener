@@ -67,7 +67,7 @@ TICKERS = ["AADI.JK", "AALI.JK", "ABBA.JK", "ABDA.JK", "ABMM.JK", "ACES.JK", "AC
            ]
 
 # Data Download
-CACHE_DIR = Path("cache_yfinance")
+CACHE_DIR = Path(__file__).parent / "cache_yfinance"
 CACHE_MAX_AGE_HOURS = 18
 BATCH_SIZE = 60
 DOWNLOAD_PERIOD = "1y"
