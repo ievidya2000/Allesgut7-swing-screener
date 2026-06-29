@@ -13,7 +13,7 @@
 
 Screening saham IDX berbasis technical analysis dengan **9 setup types**, Monte Carlo simulation, dan reinforcement learning ranking.
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Setup Types](#-setup-types) • [Architecture](#-architecture) • [CLI Commands](#-cli-commands) • [Deployment](#-deployment)
+[Features](#-features) • [Quick Start](#-quick-start) • [Setup Types](#-setup-types) • [Architecture](#-architecture) • [CLI Commands](#-cli-commands) • [Deployment](#-deployment) • [Guide](guide.md)
 
 </div>
 
@@ -124,13 +124,21 @@ screener_v2/
 ├── rl/                       # Reinforcement Learning module
 │   ├── ranker.py             # RL scoring/ranking (inference)
 │   ├── auto_retrain.py       # Auto-retrain pipeline
-│   ├── train_ranker.py       # Training script
-│   ├── extract_features.py   # Feature extraction
+│   ├── train_ranker.py       # Training script (Optuna + ensemble)
+│   ├── extract_features.py   # Feature extraction (60+ features)
+│   ├── generate_augmented.py # Data augmentation for training
+│   ├── run_pipeline.py       # Full RL pipeline runner
+│   ├── production_predictor.py # Production prediction wrapper
+│   ├── model_versioning.py   # Model versioning & rollback
+│   ├── tabnet_config.py      # TabNet hyperparameter configs
 │   └── models/               # Trained models (.pkl)
 │       ├── ensemble_model.pkl
 │       ├── ranker_model.pkl
 │       ├── classifier_model.pkl
-│       └── tabnet_model.pkl
+│       ├── tabnet_model.pkl
+│       ├── feature_scaler.pkl
+│       ├── label_encoders.pkl
+│       └── model_version.json
 │
 ├── adaptive/                 # Adaptive Learning module
 │   ├── config.py             # Adaptive config management
@@ -138,7 +146,8 @@ screener_v2/
 │   └── models/               # Saved adaptive configs (.json)
 │
 ├── utils/                    # Utilities
-│   └── date_utils.py         # Date normalization helpers
+│   ├── date_utils.py         # Date normalization helpers
+│   └── price_utils.py        # IDX tick size rounding
 │
 └── tests/                    # Unit tests
     └── test_core.py
@@ -156,8 +165,9 @@ screener_v2/
 | `POSITION_SIZE` | Rp 10M | Per-entry position size |
 | `MAX_POSITIONS` | 12 | Maximum concurrent positions |
 | `RISK_PER_TRADE_PCT` | 2% | Maximum risk per trade |
-| `SL_MULTIPLIER` | 1.2x ATR | Stop loss distance |
+| `SL_MULTIPLIER` | 1.5x ATR | Stop loss distance |
 | `RR1 / RR2 / RR3` | 1.5 / 2.5 / 3.0 | Risk-reward ratios for TP1/TP2/TP3 |
+| `TP1_PCT / TP2_PCT / TP3_PCT` | 60% / 25% / 15% | Partial exit allocation at each TP |
 
 ### Indicator Parameters
 
@@ -344,9 +354,13 @@ plotly>=5.0              # Interactive charts (Streamlit)
 streamlit>=1.20          # Web dashboard
 yfinance>=0.2.0          # Yahoo Finance data
 statsmodels>=0.13        # Markov regime-switching model
-scikit-learn>=1.2        # ML models (pickle deserialization)
-psycopg2-binary>=2.9     # PostgreSQL driver (optional)
+scikit-learn>=1.2        # ML models
 scipy>=1.9               # Statistical functions
+xgboost>=1.7             # XGBoost (RL ensemble)
+lightgbm>=3.3            # LightGBM (RL ensemble)
+pytorch-tabnet>=4.0      # TabNet (RL ensemble)
+optuna>=3.0              # Hyperparameter tuning
+psycopg2-binary>=2.9     # PostgreSQL driver (optional)
 ```
 
 ---
