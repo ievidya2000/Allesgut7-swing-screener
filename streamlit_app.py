@@ -343,6 +343,7 @@ def cached_run_screener(market_data_hash, market_regime):
             results.append({
                 "Ticker": ticker,
                 "Setup": setup,
+                "Signal": signal_type,
                 "Price": round(close, 2),
                 "Stock Regime": stock_regime,
                 "ADX": round(adx, 2),
@@ -353,6 +354,7 @@ def cached_run_screener(market_data_hash, market_regime):
                 "Prob(TP3)": prob["P_TP3"],
                 "Prob(SL)": prob["P_SL"],
                 "Avg Days TP1": round(prob["AVG_DAYS_TP1"], 2) if prob["AVG_DAYS_TP1"] else None,
+                "Avg Days TP2": round(prob["AVG_DAYS_TP2"], 2) if prob["AVG_DAYS_TP2"] else None,
                 "Avg Days TP3": round(prob["AVG_DAYS_TP3"], 2) if prob["AVG_DAYS_TP3"] else None,
                 "Stop Loss": round(analysis["sl_normal"], 2),
                 "SL Wide": round(analysis["sl_wide"]["price"], 2),
@@ -407,6 +409,17 @@ def cached_run_screener(market_data_hash, market_regime):
         bear_mask = df_out.get("BearFiltered", False)
         low_score_mask = df_out["Score"] < 0.5
         df_out = df_out[~(bear_mask & low_score_mask)].reset_index(drop=True)
+
+        # Normalize Score to 0-100
+        if len(df_out) > 1:
+            s_min = df_out["Score"].min()
+            s_max = df_out["Score"].max()
+            if s_max > s_min:
+                df_out["Score"] = ((df_out["Score"] - s_min) / (s_max - s_min) * 100).round(1)
+            else:
+                df_out["Score"] = 50.0
+        elif len(df_out) == 1:
+            df_out["Score"] = 50.0
 
         # Add fundamental data features
         try:
@@ -792,18 +805,44 @@ def render_results():
 
             st.text(da['chart'])
 
-    # CSV download with analysis date
+    # CSV download with clean columns
     analysis_date = datetime.now().strftime("%d%b%Y")
     csv_filename = f"hasil_screener_{analysis_date}.csv"
-    
-    analysis_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    market_regime = st.session_state.get('market_regime', 'N/A')
-    header = f"# Swing Screener Analysis - {analysis_timestamp}\n"
-    header += f"# Market Regime: {market_regime}\n"
-    header += f"# Total Setups: {len(filtered)}\n#\n"
-    
-    csv_content = filtered.to_csv(index=False)
-    csv = (header + csv_content).encode("utf-8")
+
+    # Build clean probability columns (float, not string with %)
+    export_df = filtered.copy()
+    for tp in ["TP1", "TP2", "TP3"]:
+        src = f"Prob({tp})"
+        dst = f"Prob_{tp}"
+        if src in export_df.columns:
+            export_df[dst] = export_df[src].apply(
+                lambda x: float(str(x).rstrip('%')) if pd.notna(x) and str(x).strip() not in ('', 'None', 'nan') else None
+            )
+    if "Prob(SL)" in export_df.columns:
+        export_df["Prob_SL"] = export_df["Prob(SL)"].apply(
+            lambda x: float(str(x).rstrip('%')) if pd.notna(x) and str(x).strip() not in ('', 'None', 'nan') else None
+        )
+
+    # Curated column list for export
+    CSV_COLS = [
+        "Ticker", "Signal", "Setup", "Price", "Stock Regime",
+        "Score", "RL Score", "Profit Prob",
+        "Stop Loss", "SL Wide", "TP1", "TP2", "TP3",
+        "Entry Zone Low", "Entry Zone High", "Entry Strategy",
+        "Profit %", "Risk %",
+        "Prob_TP1", "Prob_TP2", "Prob_TP3", "Prob_SL",
+        "Avg Days TP1", "Avg Days TP2", "Avg Days TP3",
+        "Timing", "ADX",
+    ]
+    avail_cols = [c for c in CSV_COLS if c in export_df.columns]
+    export_df = export_df[avail_cols].sort_values("Score", ascending=False)
+
+    # Round numeric columns
+    num_cols = export_df.select_dtypes(include=["float", "float64"]).columns
+    export_df[num_cols] = export_df[num_cols].round(2)
+
+    csv_content = export_df.to_csv(index=False)
+    csv = csv_content.encode("utf-8")
     st.download_button("📥 Download CSV", csv, csv_filename, "text/csv", use_container_width=True)
 
     # Per-Setup Top 5

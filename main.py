@@ -247,21 +247,47 @@ def run_screener():
                 prob_sl=r.get("Prob(SL)", "N/A"),
             )
 
-    # Save CSV
-    save_cols = [c for c in [
-        "Ticker", "Setup", "Signal", "Price", "Stock Regime",
+    # Save CSV — clean columns and formatting
+    def _clean_prob(val):
+        """Convert probability string like '72.5%' to float 72.5"""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return None
+        s = str(val).strip().rstrip('%')
+        try:
+            return round(float(s), 2)
+        except (ValueError, TypeError):
+            return None
+
+    csv_df = df_out.copy()
+
+    # Clean probability columns
+    for col in ["Prob(TP1)", "Prob(TP2)", "Prob(TP3)", "Prob(SL)"]:
+        if col in csv_df.columns:
+            csv_df[col] = csv_df[col].apply(_clean_prob)
+
+    # Remove internal columns
+    drop_cols = ["Chart"]
+    csv_df = csv_df.drop(columns=[c for c in drop_cols if c in csv_df.columns], errors="ignore")
+
+    # Curated column order
+    save_cols = [
+        "Ticker", "Signal", "Setup", "Price", "Stock Regime",
         "Cloud", "Trend", "ADX", "ATR",
         "Stop Loss", "SL Wide", "TP1", "TP2", "TP3",
         "Entry Zone Low", "Entry Zone High", "Entry Strategy",
         "Profit %", "Risk %",
         "Prob(TP1)", "Prob(TP2)", "Prob(TP3)", "Prob(SL)",
         "Avg Days TP1", "Avg Days TP2", "Avg Days TP3",
-        "Timing", "Timing Detail", "Score",
-    ] if c in df_out.columns]
+        "Timing",
+    ]
+    avail_cols = [c for c in save_cols if c in csv_df.columns]
+    csv_df = csv_df[avail_cols].sort_values("Score" if "Score" in csv_df.columns else avail_cols[0], ascending=False)
 
-    df_out[save_cols].sort_values("Score", ascending=False).to_csv(
-        "hasil_screener_v2.csv", index=False
-    )
+    # Round numeric columns
+    num_cols = csv_df.select_dtypes(include=["float", "float64"]).columns
+    csv_df[num_cols] = csv_df[num_cols].round(2)
+
+    csv_df.to_csv("hasil_screener_v2.csv", index=False)
 
     print(sep("="))
     print("  Saved to hasil_screener_v2.csv")
