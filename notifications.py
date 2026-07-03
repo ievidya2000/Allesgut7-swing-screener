@@ -1,5 +1,6 @@
 """Email notification system."""
 
+import html
 import smtplib
 import logging
 from email.mime.text import MIMEText
@@ -73,18 +74,21 @@ def send_email(subject, body, attachments=None, html=False):
 
 
 def send_daily_summary_email(summary, report_text, attachments=None):
-    subject = f"[Swing Screener] Daily Summary - {summary['date']}"
+    subject = f"[Swing Screener] Daily Summary - {html.escape(str(summary.get('date', '')))}"
 
     today_trades = summary.get('today_trade_details', [])
     trades_rows = ""
     for t in today_trades:
         color = "#2ecc71" if t.get('return_pct', 0) > 0 else "#e74c3c"
+        ticker = html.escape(str(t.get('ticker', '')))
+        setup = html.escape(str(t.get('setup', 'N/A')))
+        exit_reason = html.escape(str(t.get('exit_reason', '')))
         trades_rows += f"""
         <tr>
-            <td style="padding: 8px; border: 1px solid #ddd;">{t['ticker']}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{t.get('setup', 'N/A')}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{ticker}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{setup}</td>
             <td style="padding: 8px; border: 1px solid #ddd; color: {color}; font-weight: bold;">{t.get('return_pct', 0):+.2f}%</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{t.get('exit_reason', '')}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{exit_reason}</td>
             <td style="padding: 8px; border: 1px solid #ddd;">{t.get('days_held', 0)}</td>
         </tr>
         """
@@ -116,7 +120,7 @@ def send_daily_summary_email(summary, report_text, attachments=None):
         <div class="container">
             <div class="header">
                 <h1>Daily Performance Summary</h1>
-                <p>{summary['date']}</p>
+                <p>{html.escape(str(summary.get('date', '')))}</p>
             </div>
 
             <div class="content">

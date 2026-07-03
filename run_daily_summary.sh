@@ -3,7 +3,7 @@
 # Run via cron: 0 11 * * * /home/chalderaaa/swing-screener/screener_v2/run_daily_summary.sh
 # (11:00 UTC = 18:00 WIB)
 
-cd /home/chalderaaa/swing-screener/screener_v2
+cd "$(dirname "$0")"
 
 # Activate virtual environment if exists
 if [ -f ".venv/bin/activate" ]; then
