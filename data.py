@@ -1,4 +1,5 @@
 import time
+import logging
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,11 @@ from config import (
     CACHE_DIR, CACHE_MAX_AGE_HOURS, BATCH_SIZE,
     DOWNLOAD_PERIOD, DOWNLOAD_INTERVAL, JKSE_TICKER
 )
+
+logger = logging.getLogger(__name__)
+
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 
 CACHE_DIR.mkdir(exist_ok=True)
 
@@ -35,8 +41,8 @@ def _migrate_pickle_to_parquet(pkl_path):
             parquet_path = pkl_path.with_suffix(".parquet")
             df.to_parquet(parquet_path)
             pkl_path.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not migrate {pkl_path.name}: {e}")
 
 
 def save_ticker_cache(ticker, df, start=None, end=None):
@@ -92,7 +98,7 @@ def _find_matching_cache(ticker, start, end):
         if f.name.startswith(ticker) and f.name != f"{ticker}.parquet":
             try:
                 df = pd.read_parquet(f)
-                if len(df) < 100:
+                if len(df) < 50:
                     continue
                 cache_start = df.index.min()
                 cache_end = df.index.max()
@@ -106,12 +112,18 @@ def _find_matching_cache(ticker, start, end):
     return best_df
 
 
-def normalize_yfinance_df(df):
+def normalize_yfinance_df(df, ticker=None):
     if df is None:
+        if ticker:
+            print(f"    [{ticker}] Skipped: no data returned")
         return None
     if not isinstance(df, pd.DataFrame):
+        if ticker:
+            print(f"    [{ticker}] Skipped: invalid data type")
         return None
     if df.empty:
+        if ticker:
+            print(f"    [{ticker}] Skipped: empty DataFrame")
         return None
 
     if isinstance(df.columns, pd.MultiIndex):
@@ -122,10 +134,14 @@ def normalize_yfinance_df(df):
         elif "Close" in level_1:
             df.columns = level_1
         else:
+            if ticker:
+                print(f"    [{ticker}] Skipped: no Close column in MultiIndex")
             return None
 
     required_cols = ["Open", "High", "Low", "Close", "Volume"]
     if not all(col in df.columns for col in required_cols):
+        if ticker:
+            print(f"    [{ticker}] Skipped: missing OHLCV columns")
         return None
 
     keep_cols = required_cols.copy()
@@ -138,7 +154,9 @@ def normalize_yfinance_df(df):
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
 
-    if len(df) < 100:
+    if len(df) < 50:
+        if ticker:
+            print(f"    [{ticker}] Skipped: only {len(df)} rows (< 50)")
         return None
 
     return df
@@ -160,12 +178,13 @@ def download_single_ticker(ticker, start=None, end=None):
             dl_kwargs["period"] = DOWNLOAD_PERIOD
 
         df = yf.download(ticker, **dl_kwargs)
-        df = normalize_yfinance_df(df)
+        df = normalize_yfinance_df(df, ticker)
         if df is not None:
             save_ticker_cache(ticker, df, start, end)
             return df
         return None
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Download failed for {ticker}: {e}")
         return None
 
 
@@ -214,7 +233,7 @@ def download_tickers_batch(tickers, start=None, end=None):
                             failed_tickers.append(ticker)
                             continue
 
-                    df = normalize_yfinance_df(df)
+                    df = normalize_yfinance_df(df, ticker)
                     if df is not None:
                         save_ticker_cache(ticker, df, start, end)
                         downloaded_data[ticker] = df
@@ -227,11 +246,17 @@ def download_tickers_batch(tickers, start=None, end=None):
 
     if failed_tickers:
         print(f"  Fallback single download: {len(failed_tickers)} tickers")
+        still_failed = []
         for ticker in failed_tickers:
             df = download_single_ticker(ticker, start, end)
             if df is not None:
                 downloaded_data[ticker] = df
+                print(f"    [{ticker}] OK (fallback)")
+            else:
+                still_failed.append(ticker)
             time.sleep(0.2)
+        if still_failed:
+            print(f"  Failed ({len(still_failed)}): {still_failed}")
 
     return downloaded_data
 
@@ -243,7 +268,7 @@ def get_all_market_data(tickers, start=None, end=None):
     print("Checking cache...")
     for ticker in tickers:
         cached_df = load_ticker_cache(ticker, start, end)
-        if cached_df is not None and len(cached_df) >= 100:
+        if cached_df is not None and len(cached_df) >= 50:
             market_data[ticker] = cached_df
         else:
             tickers_to_download.append(ticker)
@@ -272,14 +297,14 @@ def get_jkse_data(force_download=False, start=None, end=None):
         if cache_is_valid(parquet_path, CACHE_MAX_AGE_HOURS):
             try:
                 df = pd.read_parquet(parquet_path)
-                if df is not None and len(df) >= 100:
+                if df is not None and len(df) >= 50:
                     return df
             except Exception:
                 pass
         if cache_is_valid(pkl_path, CACHE_MAX_AGE_HOURS):
             try:
                 df = pd.read_pickle(pkl_path)
-                if df is not None and len(df) >= 100:
+                if df is not None and len(df) >= 50:
                     return df
             except Exception:
                 pass
@@ -310,7 +335,8 @@ def get_jkse_data(force_download=False, start=None, end=None):
             except Exception:
                 df.to_pickle(pkl_path, protocol=4)
         return df
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to download JKSE data: {e}")
         return None
 
 
