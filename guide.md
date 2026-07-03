@@ -853,7 +853,7 @@ crontab -e
 
 ### Q: Berapa lama screening berlangsung?
 
-**A**: Full screening 600+ saham membutuhkan **10-30 menit** tergantung koneksi internet dan kecepatan server. Data di-cache selama 18 jadi screening kedua di hari yang sama jauh lebih cepat.
+**A**: Full screening 600+ saham membutuhkan **10-30 menit** tergantung koneksi internet dan kecepatan server. Data di-cache selama 8 jam jadi screening kedua di hari yang sama jauh lebih cepat.
 
 ### Q: Kenapa tidak ada setup yang ditemukan?
 

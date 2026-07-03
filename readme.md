@@ -337,7 +337,7 @@ export TO_EMAIL="recipient@example.com"
 | Error | Solution |
 |-------|----------|
 | `ModuleNotFoundError` | Run from repo root (`screener_v2/`), ensure `__init__.py` exists |
-| `yfinance download failed` | Check internet connection; data cached 18h in `cache_yfinance/` |
+| `yfinance download failed` | Check internet connection; data cached 8h in `cache_yfinance/` |
 | `SQLite database is locked` | Close other instances using the database |
 | Email not sending | Check SMTP credentials in `secrets.toml` or env vars |
 | No setups found | Normal in BEAR market — only EARLY_REVERSAL considered |
