@@ -20,7 +20,10 @@ RESULTS_PATH = MODELS_DIR / "optimization_results.json"
 class ParameterOptimizer:
     def __init__(self):
         self.param_grid = {
-            "supertrend_multiplier": [2.0, 2.5, 3.0, 3.5, 4.0],
+            # Multi-SuperTrend parameters
+            "st_fast_multiplier": [1.5, 2.0, 2.5],
+            "st_med_multiplier": [3.0, 3.5, 4.0],
+            "st_slow_multiplier": [3.5, 4.0, 4.5],
             "adx_threshold": [20, 22, 25, 28],
             "rr1": [1.5, 2.0, 2.5],
             "sl_multiplier": [1.2, 1.5, 2.0],
@@ -32,6 +35,14 @@ class ParameterOptimizer:
             "stoch_oversold": [15, 20, 25],
             "entry_zone_max_atr": [0.5, 0.75, 1.0],
             "entry_zone_max_pct": [0.03, 0.04, 0.05],
+            # Too Late Filter parameters
+            "max_runup": [0.20, 0.30, 0.40],
+            "max_runup_block": [0.40, 0.50, 0.60],
+            "max_price_to_ma20": [0.10, 0.15, 0.20],
+            # Volume Quality parameters
+            "min_dollar_volume": [300_000_000, 500_000_000, 1_000_000_000],
+            # Pattern Score weight
+            "score_w_pattern": [0.3, 0.5, 0.7],
         }
 
         self.results = []
@@ -44,7 +55,7 @@ class ParameterOptimizer:
         precomputed = {}
         for ticker, df in market_data.items():
             try:
-                if len(df) < 100:
+                if len(df) < 50:
                     continue
                 full = calculate_full_indicators(df, custom_params=params)
                 precomputed[ticker] = full
@@ -408,7 +419,8 @@ class ParameterOptimizer:
         print(f"{'='*60}\n")
 
         key_params = [
-            "supertrend_multiplier", "adx_threshold", "rr1",
+            "st_fast_multiplier", "st_med_multiplier", "st_slow_multiplier",
+            "adx_threshold", "rr1",
             "sl_multiplier", "donchian_period", "volume_ma_period",
             "rsi_period", "rsi_oversold", "stoch_k", "stoch_oversold",
             "entry_zone_max_atr", "entry_zone_max_pct",
@@ -475,7 +487,8 @@ class ParameterOptimizer:
 
         current_config = load_adaptive_config()
         print(f"\n  Current adaptive config:")
-        for key in ["supertrend_multiplier", "adx_threshold", "rr1", "sl_multiplier",
+        for key in ["st_fast_multiplier", "st_med_multiplier", "st_slow_multiplier",
+                     "adx_threshold", "rr1", "sl_multiplier",
                      "rsi_period", "rsi_oversold", "stoch_k", "stoch_oversold"]:
             print(f"    {key}: {current_config.get(key, 'N/A')}")
 
@@ -557,7 +570,8 @@ class ParameterOptimizer:
             )
 
             print(f"\n  NEW PARAMETERS APPLIED:")
-            for key in ["supertrend_multiplier", "adx_threshold", "rr1", "sl_multiplier",
+            for key in ["st_fast_multiplier", "st_med_multiplier", "st_slow_multiplier",
+                         "adx_threshold", "rr1", "sl_multiplier",
                          "rsi_period", "rsi_oversold", "stoch_k", "stoch_oversold",
                          "entry_zone_max_atr", "entry_zone_max_pct"]:
                 old_val = current_config.get(key)
@@ -654,7 +668,7 @@ class ParameterOptimizer:
             config = entry.get("config", {})
 
             changes = []
-            for key in ["supertrend_multiplier", "adx_threshold", "rr1"]:
+            for key in ["st_fast_multiplier", "st_med_multiplier", "st_slow_multiplier", "adx_threshold", "rr1"]:
                 if key in config:
                     changes.append(f"{key}={config[key]}")
             changes_str = ", ".join(changes[:3])
@@ -662,3 +676,23 @@ class ParameterOptimizer:
             print(f"  {timestamp:<22s} {sharpe:>8.4f} {status:<10s} {changes_str}")
 
         print(f"\n{'='*60}")
+
+
+if __name__ == "__main__":
+    import warnings
+    warnings.filterwarnings("ignore")
+    from datetime import datetime, timedelta
+
+    optimizer = ParameterOptimizer()
+
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=90)
+
+    print(f"\n{'='*60}")
+    print(f"  ADAPTIVE PARAMETER OPTIMIZER")
+    print(f"  Period: {start_date.date()} to {end_date.date()}")
+    print(f"  Parameters: {len(optimizer.param_grid)}")
+    print(f"{'='*60}\n")
+
+    optimizer.optimize(start_date=start_date, end_date=end_date)
+    optimizer.show_results()
