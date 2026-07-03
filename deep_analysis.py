@@ -8,9 +8,9 @@ from indicators import (
 )
 from signals import determine_stock_regime, classify_setup_state
 from analysis import generate_deep_analysis
-from patterns import detect_patterns
+from patterns import detect_patterns, get_pattern_score
 from data import normalize_yfinance_df
-from config import ATR_LENGTH, ATR_MULTIPLIER
+from config import ATR_LENGTH, ATR_MULTIPLIER, ST_FAST_PERIOD, ST_FAST_MULTIPLIER, ST_MED_PERIOD, ST_MED_MULTIPLIER, ST_SLOW_PERIOD, ST_SLOW_MULTIPLIER
 
 
 def _validate_ohlc(df):
@@ -41,26 +41,35 @@ def multi_timeframe_analysis(ticker):
         if wk is not None and len(wk) >= 8:
             h, l, c = wk['High'], wk['Low'], wk['Close']
 
-            _, st_dir = get_supertrend(h, l, c, ATR_LENGTH, ATR_MULTIPLIER)
+            # Multi-ST untuk weekly
+            _, st_fast_dir = get_supertrend(h, l, c, ST_FAST_PERIOD, ST_FAST_MULTIPLIER)
+            _, st_med_dir = get_supertrend(h, l, c, ST_MED_PERIOD, ST_MED_MULTIPLIER)
+            _, st_slow_dir = get_supertrend(h, l, c, ST_SLOW_PERIOD, ST_SLOW_MULTIPLIER)
             ma20 = c.rolling(20).mean().iloc[-1] if len(c) >= 20 else c.iloc[-1]
 
             ichi = get_ichimoku(h, l, c)
             above_cloud = ichi['price_above_cloud'].iloc[-1]
             below_cloud = ichi['price_below_cloud'].iloc[-1]
 
-            st_bull = st_dir.iloc[-1] > 0
+            st_fast_bull = st_fast_dir.iloc[-1] > 0
+            st_med_bull = st_med_dir.iloc[-1] > 0
+            st_slow_bull = st_slow_dir.iloc[-1] > 0
+            st_count = sum([st_fast_bull, st_med_bull, st_slow_bull])
             price_vs_ma = "ABOVE" if c.iloc[-1] > ma20 else "BELOW"
 
-            if above_cloud and st_bull:
+            if above_cloud and st_count >= 2:
                 wk_trend = "BULLISH"
-            elif below_cloud and not st_bull:
+            elif below_cloud and st_count <= 1:
                 wk_trend = "BEARISH"
             else:
                 wk_trend = "SIDEWAYS"
 
             result["weekly"] = {
                 "trend": wk_trend,
-                "supertrend": "UP" if st_bull else "DOWN",
+                "supertrend": f"{'UP' if st_med_bull else 'DOWN'} ({st_count}/3)",
+                "st_fast": "UP" if st_fast_bull else "DOWN",
+                "st_med": "UP" if st_med_bull else "DOWN",
+                "st_slow": "UP" if st_slow_bull else "DOWN",
                 "price_vs_ma20": price_vs_ma,
                 "ma20": round(ma20, 2) if pd.notna(ma20) else None,
             }
@@ -205,7 +214,9 @@ def generate_interpretation(full_df, setup, da, mta, vp, tl, rs, patterns, meta,
     lines = []
 
     # ── 1. Trend Interpretation ──
-    st_bull = last.get('supertrend_bullish', False)
+    st_count = int(last.get('st_bullish_count', 0))
+    st_fast_bull = last.get('st_fast_bullish', False)
+    st_slow_bull = last.get('st_slow_bullish', False)
     above_cloud = last.get('price_above_cloud', False)
     below_cloud = last.get('price_below_cloud', False)
     adx = last.get('adx', 0)
@@ -213,13 +224,13 @@ def generate_interpretation(full_df, setup, da, mta, vp, tl, rs, patterns, meta,
     don_mid = last.get('donchian_mid', 0)
 
     trend_parts = []
-    if above_cloud and st_bull:
+    if above_cloud and st_count >= 2:
         trend_parts.append("Harga sedang naik dan momentum positif")
-    elif below_cloud and not st_bull:
+    elif below_cloud and st_count <= 1:
         trend_parts.append("Harga sedang turun dan momentum negatif")
-    elif above_cloud and not st_bull:
+    elif above_cloud and st_count <= 1:
         trend_parts.append("Harga masih di atas support tapi momentum mulai melemah")
-    elif below_cloud and st_bull:
+    elif below_cloud and st_count >= 2:
         trend_parts.append("Harga di bawah resistance tapi momentum mulai naik")
     else:
         trend_parts.append("Harga bergerak datar, belum ada arah jelas")
@@ -251,11 +262,43 @@ def generate_interpretation(full_df, setup, da, mta, vp, tl, rs, patterns, meta,
     for p in trend_parts:
         lines.append(f"  • {p}")
 
+    # ── 1b. Too Late / Distribution Warning ──
+    from signals import check_too_late, check_wait_pullback
+    from adaptive.config import load_adaptive_config
+    adaptive_params = load_adaptive_config()
+    is_too_late, too_late_reason = check_too_late(full_df, adaptive_params)
+    should_wait, wait_reason = check_wait_pullback(full_df, adaptive_params)
+
+    if is_too_late:
+        lines.append("")
+        lines.append("⚠️ PERINGATAN: SUDAH TERLAMBAT MASUK")
+        lines.append(f"  • {too_late_reason}")
+        lines.append("  • JANGAN ENTRY - cari saham lain yang belum bergerak")
+    elif should_wait:
+        lines.append("")
+        lines.append("⚠️ TUNGGU PULLBACK")
+        lines.append(f"  • {wait_reason}")
+        lines.append("  • Tunggu harga turun ke support sebelum entry")
+
+    # Show extension metrics
+    runup = last.get('runup_50d', 0)
+    price_to_ma20 = last.get('price_to_ma20_pct', 0)
+    if pd.notna(runup) and runup > 0.15:
+        lines.append(f"  • Run-up dari low 50 hari: {runup:.0%}")
+    if pd.notna(price_to_ma20) and price_to_ma20 > 0.05:
+        lines.append(f"  • Harga {price_to_ma20:.0%} di atas MA20")
+
     # ── 2. Volume Interpretation ──
     vol_parts = []
     vol_expanding = last.get('volume_expanding', False)
     vol_pre_breakout = last.get('volume_pre_breakout', False)
     vol_contraction = last.get('vol_contraction', False)
+
+    # Volume Quality Metrics
+    dollar_volume = last.get('dollar_volume', 0)
+    vol_quality = last.get('volume_quality', 'Low')
+    vol_cv = last.get('vol_cv', 0)
+    vol_per_atr = last.get('vol_per_atr', 0)
 
     # Volume Delta Analysis
     volume_delta = last.get('volume_delta', 0)
@@ -263,27 +306,52 @@ def generate_interpretation(full_df, setup, da, mta, vp, tl, rs, patterns, meta,
     obv_rising = last.get('obv_rising', False)
     ad_rising = last.get('ad_rising', False)
 
-    if vol_expanding:
-        if delta_positive:
-            vol_parts.append(f"Volume tinggi, didominasi pembeli (delta +{volume_delta:,.0f})")
-        else:
-            vol_parts.append(f"Volume tinggi, didominasi penjual (delta {volume_delta:,.0f})")
+    # Format dollar volume
+    if dollar_volume >= 1_000_000_000:
+        dv_str = f"Rp {dollar_volume/1_000_000_000:.1f}M"
+    elif dollar_volume >= 1_000_000:
+        dv_str = f"Rp {dollar_volume/1_000_000:.0f}jt"
     else:
-        vol_parts.append("Volume rendah, aktivitas transaksi sedikit")
+        dv_str = f"Rp {dollar_volume:,.0f}"
+
+    # Volume quality assessment
+    if vol_quality in ['High', 'Very High']:
+        vol_parts.append(f"Volume {vol_quality} ({dv_str}/hari) - likuiditas bagus")
+    elif vol_quality == 'Medium':
+        vol_parts.append(f"Volume {vol_quality} ({dv_str}/hari) - likuiditas cukup")
+    else:
+        vol_parts.append(f"Volume rendah ({dv_str}/hari) - HATI-HATI likuiditas terbatas")
+
+    # Volume stability
+    if vol_cv > 0 and vol_cv < 1.0:
+        vol_parts.append("Volume stabil - konsisten diperdagangkan")
+    elif vol_cv >= 1.5:
+        vol_parts.append("Volume tidak stabil - kadang ramai, kadang sepi")
+
+    # Volume trend
+    if vol_expanding and vol_quality in ['Medium', 'High', 'Very High']:
+        if delta_positive:
+            vol_parts.append(f"Volume naik, didominasi pembeli (delta +{volume_delta:,.0f})")
+        else:
+            vol_parts.append(f"Volume naik, didominasi penjual (delta {volume_delta:,.0f})")
+    elif vol_expanding and vol_quality == 'Low':
+        vol_parts.append("Volume naik tapi absolut masih kecil - perlu konfirmasi lebih lanjut")
+    else:
+        vol_parts.append("Volume normal/turun")
 
     # OBV Trend
     if obv_rising:
-        vol_parts.append("OBV naik — tekanan beli akumulasi")
+        vol_parts.append("OBV naik - tekanan beli akumulasi")
     else:
-        vol_parts.append("OBV turun — tekanan jual distribusi")
+        vol_parts.append("OBV turun - tekanan jual distribusi")
 
     # A/D Line Trend
     if ad_rising:
-        vol_parts.append("A/D Line naik — uang masuk ke saham")
+        vol_parts.append("A/D Line naik - uang masuk ke saham")
     else:
-        vol_parts.append("A/D Line turun — uang keluar dari saham")
+        vol_parts.append("A/D Line turun - uang keluar dari saham")
 
-    if vol_pre_breakout:
+    if vol_pre_breakout and vol_quality in ['Medium', 'High', 'Very High']:
         vol_parts.append("Volume mulai naik, biasanya sebelum harga naik")
     if vol_contraction:
         vol_parts.append("Harga mulai tenang, biasanya sebelum bergerak besar")
@@ -519,7 +587,7 @@ def generate_interpretation(full_df, setup, da, mta, vp, tl, rs, patterns, meta,
     # Overall assessment
     bullish_signals = 0
     bearish_signals = 0
-    if st_bull: bullish_signals += 1
+    if st_count >= 2: bullish_signals += 1
     else: bearish_signals += 1
     if above_cloud: bullish_signals += 1
     elif below_cloud: bearish_signals += 1
@@ -573,8 +641,13 @@ def generate_report(ticker, df, market_data):
 
     # Candlestick Patterns
     patterns, meta = detect_patterns(df)
+    pattern_info = get_pattern_score(patterns)
     lines.append(f"┌─ Candlestick Patterns {_pad_inner('', IW - 22)}┐")
     if patterns:
+        bias_color = "BULLISH" if pattern_info["bias"] == "BULLISH" else "BEARISH" if pattern_info["bias"] == "BEARISH" else "NEUTRAL"
+        summary_line = f"  Bias: {bias_color} | Score: {pattern_info['score']:+.1f} | Bull: {pattern_info['bullish_count']} | Bear: {pattern_info['bearish_count']}"
+        lines.append(f"│{_pad_inner(summary_line, IW)}│")
+        lines.append(f"│{'─' * IW}│")
         for name, date, conf in patterns[-6:]:
             bar = "█" * int(conf * 20)
             line = f"  {date:<8s} {name:<22s} {bar:<20s} {conf:.0%}"
@@ -592,11 +665,13 @@ def generate_report(ticker, df, market_data):
     lines.append(f"┌─ Multi-Timeframe {_pad_inner('', IW - 18)}┐")
     wk = mta["weekly"]
     if wk.get("trend"):
-        line = f"  Weekly : SuperTrend {wk['supertrend']:<5s} | MA20: {wk['price_vs_ma20']:<6s} | Trend: {wk['trend']:<8s}"
+        line = f"  Weekly : ST {wk.get('supertrend', 'N/A'):<10s} | MA20: {wk['price_vs_ma20']:<6s} | Trend: {wk['trend']:<8s}"
         lines.append(f"│{_pad_inner(line, IW)}│")
-    st_bull = last.get('supertrend_bullish', False)
-    daily_trend = "BULLISH" if st_bull else "BEARISH" if last.get('price_below_cloud', False) else "SIDEWAYS"
-    line = f"  Daily  : SuperTrend {'UP' if st_bull else 'DOWN':<5s} | Setup: {daily_trend:<8s}"
+    st_count = int(last.get('st_bullish_count', 0))
+    st_fast_bull = last.get('st_fast_bullish', False)
+    st_slow_bull = last.get('st_slow_bullish', False)
+    daily_trend = "BULLISH" if st_count >= 2 else "BEARISH" if st_count == 0 else "SIDEWAYS"
+    line = f"  Daily  : ST {'F' if st_fast_bull else '-'}{'M' if last.get('st_med_bullish', False) else '-'}{'S' if st_slow_bull else '-'} ({st_count}/3) | Setup: {daily_trend:<8s}"
     lines.append(f"│{_pad_inner(line, IW)}│")
     alignment = "ALIGNED" if wk.get("trend") == daily_trend else "CONFLICT" if wk.get("trend") else "N/A"
     line = f"  Alignment : {alignment}"
@@ -680,8 +755,8 @@ def generate_report(ticker, df, market_data):
             lines.append(f"└{'─' * IW}┘")
         else:
             lines.append(f"┌─ INTERPRETASI {_pad_inner('', IW - 16)}┐")
-        lines.append(f"│{_pad_inner('  Tidak ada setup aktif untuk interpretasi', IW)}│")
-        lines.append(f"└{'─' * IW}┘")
+            lines.append(f"│{_pad_inner('  Tidak ada setup aktif untuk interpretasi', IW)}│")
+            lines.append(f"└{'─' * IW}┘")
     except Exception as e:
         lines.append(f"┌─ INTERPRETASI {_pad_inner('', IW - 16)}┐")
         lines.append(f"│{_pad_inner(f'  Error: {e}', IW)}│")

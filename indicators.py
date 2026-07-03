@@ -4,6 +4,9 @@ import pandas as pd
 from config import (
     ICHIMOKU_TENKAN, ICHIMOKU_KIJUN, ICHIMOKU_SENKOU_B,
     DONCHIAN_PERIOD, ATR_LENGTH, ATR_MULTIPLIER,
+    ST_FAST_PERIOD, ST_FAST_MULTIPLIER,
+    ST_MED_PERIOD, ST_MED_MULTIPLIER,
+    ST_SLOW_PERIOD, ST_SLOW_MULTIPLIER,
     ADX_LENGTH, AVWAP_LOOKBACK, VOLUME_MA_PERIOD,
     ATR_PERIOD_RM, ATR_CONTRACTION_SHORT, ATR_CONTRACTION_LONG,
     VOL_MA_SHORT, VOLUME_RISING_LOOKBACK, FRESH_SIGNAL_BARS,
@@ -356,8 +359,12 @@ def calculate_full_indicators(df, custom_params=None):
 
     p = custom_params or {}
 
-    st_atr_len = p.get("supertrend_atr_length", ATR_LENGTH)
-    st_mult = p.get("supertrend_multiplier", ATR_MULTIPLIER)
+    st_fast_period = p.get("st_fast_period", ST_FAST_PERIOD)
+    st_fast_mult = p.get("st_fast_multiplier", ST_FAST_MULTIPLIER)
+    st_med_period = p.get("st_med_period", ST_MED_PERIOD)
+    st_med_mult = p.get("st_med_multiplier", ST_MED_MULTIPLIER)
+    st_slow_period = p.get("st_slow_period", ST_SLOW_PERIOD)
+    st_slow_mult = p.get("st_slow_multiplier", ST_SLOW_MULTIPLIER)
     adx_len = p.get("adx_length", ADX_LENGTH)
     donchian_p = p.get("donchian_period", DONCHIAN_PERIOD)
     vol_ma_p = p.get("volume_ma_period", VOLUME_MA_PERIOD)
@@ -377,11 +384,29 @@ def calculate_full_indicators(df, custom_params=None):
     for col in dnch.columns:
         df[col] = dnch[col]
 
-    # SuperTrend
-    df['supertrend_line'], df['supertrend_dir'] = get_supertrend(h, l, c, st_atr_len, st_mult)
-    df['supertrend_bullish'] = df['supertrend_dir'] > 0
+    # SuperTrend - Multi Instance
+    # Fast: sensitif untuk entry awal
+    df['st_fast_line'], df['st_fast_dir'] = get_supertrend(h, l, c, st_fast_period, st_fast_mult)
+    df['st_fast_bullish'] = df['st_fast_dir'] > 0
 
-    # AVWAP
+    # Medium: konfirmasi (backward compatible)
+    df['supertrend_line'], df['supertrend_dir'] = get_supertrend(h, l, c, st_med_period, st_med_mult)
+    df['supertrend_bullish'] = df['supertrend_dir'] > 0
+    df['st_med_line'] = df['supertrend_line']
+    df['st_med_dir'] = df['supertrend_dir']
+    df['st_med_bullish'] = df['supertrend_bullish']
+
+    # Slow: filter trend utama (gate)
+    df['st_slow_line'], df['st_slow_dir'] = get_supertrend(h, l, c, st_slow_period, st_slow_mult)
+    df['st_slow_bullish'] = df['st_slow_dir'] > 0
+
+    # Composite columns
+    df['st_bullish_count'] = (df['st_fast_bullish'].astype(int) +
+                              df['st_med_bullish'].astype(int) +
+                              df['st_slow_bullish'].astype(int))
+    df['st_layered_entry'] = df['st_slow_bullish'] & df['st_fast_bullish']
+
+    # AVWAP - pakai medium ST sebagai anchor
     df['avwap'] = get_avwap(h, l, c, v, df['supertrend_bullish'])
     df['price_above_avwap'] = c > df['avwap']
 
@@ -411,6 +436,17 @@ def calculate_full_indicators(df, custom_params=None):
     df['atr_10'] = get_atr(h, l, c, ATR_CONTRACTION_SHORT)
     df['atr_50'] = get_atr(h, l, c, ATR_CONTRACTION_LONG)
 
+    # Volume Quality Metrics
+    df['dollar_volume'] = c * v
+    df['vol_per_atr'] = df['dollar_volume'] / df['atr_rm'].replace(0, 1)
+    vol_std = v.rolling(window=20).std()
+    vol_mean = df['vol_ma'].replace(0, 1)
+    df['vol_cv'] = vol_std / vol_mean
+    df['volume_quality'] = 'Low'
+    df.loc[df['dollar_volume'] >= 1_000_000_000, 'volume_quality'] = 'Medium'
+    df.loc[df['dollar_volume'] >= 5_000_000_000, 'volume_quality'] = 'High'
+    df.loc[df['dollar_volume'] >= 20_000_000_000, 'volume_quality'] = 'Very High'
+
     # Volume MA short
     df['vol_ma_5'] = v.rolling(window=VOL_MA_SHORT).mean()
 
@@ -438,6 +474,30 @@ def calculate_full_indicators(df, custom_params=None):
     df['ma50'] = c.rolling(50).mean()
     df['ma20_slope'] = df['ma20'].diff(5) / df['ma20'].shift(5)
     df['ma20_above_ma50'] = df['ma20'] > df['ma50']
+
+    # --- Too Late Filter Indicators ---
+    # Price extension from MA20
+    df['price_to_ma20_pct'] = (c - df['ma20']) / df['ma20'].replace(0, 1)
+
+    # Price extension from AVWAP
+    df['price_to_avwap_pct'] = (c - df['avwap']) / df['avwap'].replace(0, 1)
+
+    # Run-up from 50-day low
+    low_50d = l.rolling(50).min()
+    df['runup_50d'] = (c - low_50d) / low_50d.replace(0, 1)
+
+    # Volume selling ratio (volume on down days vs up days)
+    o = df['Open']
+    is_red = c < o  # Bearish candle
+    is_green = c > o  # Bullish candle
+    vol_red = v.where(is_red, 0)
+    vol_green = v.where(is_green, 0)
+    vol_red_ma = vol_red.rolling(10).mean()
+    vol_green_ma = vol_green.rolling(10).mean()
+    df['vol_selling_ratio'] = vol_red_ma / vol_green_ma.replace(0, 1)
+
+    # Distribution signal: volume selling ratio > 1.5 means selling pressure dominates
+    df['distribution_signal'] = df['vol_selling_ratio'] > 1.5
 
     # --- Inside Bars (for tight base detection) ---
     inside = (h <= h.shift(1)) & (l >= l.shift(1))
@@ -477,6 +537,9 @@ def calculate_full_indicators(df, custom_params=None):
     df['stoch_overbought'] = df['stoch_k'] > 80
     df['stoch_bullish_cross'] = (df['stoch_k'] > df['stoch_d']) & (df['stoch_k'].shift(1) <= df['stoch_d'].shift(1))
 
+    # Momentum exhaustion: RSI overbought AND Stoch overbought
+    df['momentum_exhaustion'] = (df['rsi'] > 70) & (df['stoch_k'] > 80)
+
     # --- Elliott Wave ---
     wave_pos, fib_382, fib_500, fib_618, fib_786 = get_elliott_wave(h, l, c)
     df['wave_position'] = wave_pos
@@ -493,15 +556,5 @@ def calculate_full_indicators(df, custom_params=None):
     macd_bull_div, macd_bear_div = detect_divergence(c, df['macd_histogram'])
     df['macd_bullish_div'] = macd_bull_div
     df['macd_bearish_div'] = macd_bear_div
-
-    # --- OBV Crossover (activate unused feature) ---
-    df['obv_above_ma'] = df['obv'] > df['obv_ma']
-    df['obv_cross_up'] = df['obv_above_ma'] & ~df['obv_above_ma'].shift(1).fillna(False)
-
-    # --- A/D Line acceleration ---
-    df['ad_acceleration'] = df['ad_line'].diff(3)
-
-    # --- Donchian Breakdown (activate unused feature) ---
-    # Already computed as 'donchian_breakdown' in get_donchian()
 
     return df

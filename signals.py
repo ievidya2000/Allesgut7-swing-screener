@@ -1,13 +1,99 @@
 import numpy as np
 import pandas as pd
 
-from config import ADX_THRESHOLD, FRESH_SIGNAL_BARS
+from config import (
+    ADX_THRESHOLD, FRESH_SIGNAL_BARS,
+    MAX_RUNUP, MAX_RUNUP_BLOCK, MAX_PRICE_TO_MA20, MAX_PRICE_TO_AVWAP,
+    RSI_OVERBOUGHT, STOCH_OVERBOUGHT
+)
 from indicators import (
     get_ichimoku, get_supertrend, get_adx, rma
 )
 
 
+def check_too_late(full_df, custom_params=None):
+    """Check if stock is too late to enter - returns (is_too_late, reason)"""
+    if full_df is None or len(full_df) < 2:
+        return False, ""
+
+    p = custom_params or {}
+    last = full_df.iloc[-1]
+
+    max_runup_block = p.get("max_runup_block", MAX_RUNUP_BLOCK)
+    max_price_to_ma20 = p.get("max_price_to_ma20", MAX_PRICE_TO_MA20)
+    max_price_to_avwap = p.get("max_price_to_avwap", MAX_PRICE_TO_AVWAP)
+
+    # Check run-up from 50-day low
+    runup = last.get('runup_50d', 0)
+    if pd.notna(runup) and runup > max_runup_block:
+        return True, f"Run-up {runup:.0%} dari low 50 hari, sudah terlalu jauh"
+
+    # Check price extension from MA20
+    price_to_ma20 = last.get('price_to_ma20_pct', 0)
+    if pd.notna(price_to_ma20) and price_to_ma20 > max_price_to_ma20:
+        return True, f"Harga {price_to_ma20:.0%} di atas MA20, terlalu tinggi"
+
+    # Check price extension from AVWAP
+    price_to_avwap = last.get('price_to_avwap_pct', 0)
+    if pd.notna(price_to_avwap) and price_to_avwap > max_price_to_avwap:
+        return True, f"Harga {price_to_avwap:.0%} di atas AVWAP, terlalu tinggi"
+
+    # Check distribution signal
+    if last.get('distribution_signal', False):
+        return True, "Volume jual mendominasi volume beli - distribusi aktif"
+
+    # Check momentum exhaustion
+    if last.get('momentum_exhaustion', False):
+        return True, "RSI dan Stochastic overbought bersamaan - momentum habis"
+
+    # Check bearish divergence
+    if last.get('rsi_bearish_div', False) or last.get('macd_bearish_div', False):
+        return True, "Bearish divergence terdeteksi - potensi reversal"
+
+    return False, ""
+
+
+def check_wait_pullback(full_df, custom_params=None):
+    """Check if stock should wait for pullback - returns (should_wait, reason)"""
+    if full_df is None or len(full_df) < 2:
+        return False, ""
+
+    p = custom_params or {}
+    last = full_df.iloc[-1]
+    reasons = []
+
+    max_runup = p.get("max_runup", MAX_RUNUP)
+    rsi_overbought = p.get("rsi_overbought", RSI_OVERBOUGHT)
+    stoch_overbought = p.get("stoch_overbought", STOCH_OVERBOUGHT)
+
+    # Check run-up (softer threshold)
+    runup = last.get('runup_50d', 0)
+    if pd.notna(runup) and runup > max_runup:
+        reasons.append(f"Run-up {runup:.0%}, tunggu pullback")
+
+    # Check RSI overbought
+    if last.get('rsi', 50) > rsi_overbought:
+        reasons.append(f"RSI {last['rsi']:.0f} overbought")
+
+    # Check Stoch overbought
+    if last.get('stoch_k', 50) > stoch_overbought:
+        reasons.append(f"Stoch {last['stoch_k']:.0f} overbought")
+
+    # Check price near MA20 (within 5%)
+    price_to_ma20 = last.get('price_to_ma20_pct', 0)
+    if pd.notna(price_to_ma20) and price_to_ma20 > 0.05:
+        reasons.append(f"Harga {price_to_ma20:.0%} di atas MA20")
+
+    if reasons:
+        return True, "; ".join(reasons)
+
+    return False, ""
+
+
 def determine_market_regime(jkse_df):
+    if jkse_df is None or len(jkse_df) < 60:
+        return "SIDEWAYS"
+
     h = jkse_df['High']
     l = jkse_df['Low']
     c = jkse_df['Close']
@@ -32,28 +118,39 @@ def determine_market_regime(jkse_df):
 
 
 def determine_stock_regime(full_df):
+    if full_df is None or len(full_df) == 0:
+        return "SIDEWAYS"
+
     last = full_df.iloc[-1]
 
     above_cloud = last.get('price_above_cloud', False)
     below_cloud = last.get('price_below_cloud', False)
-    st_bullish = last.get('supertrend_bullish', False)
 
-    if above_cloud and st_bullish:
+    # Multi-ST consensus: medium sebagai primary, slow sebagai filter
+    st_med_bullish = last.get('supertrend_bullish', False)
+    st_slow_bullish = last.get('st_slow_bullish', False)
+    st_bullish_count = last.get('st_bullish_count', 0)
+
+    # BULL: above cloud + minimal 2 ST bullish (termasuk slow)
+    # BEAR: below cloud + maximal 1 ST bullish
+    if above_cloud and st_bullish_count >= 2:
         return "BULL"
-    elif below_cloud and not st_bullish:
+    elif below_cloud and st_bullish_count <= 1:
         return "BEAR"
     else:
         return "SIDEWAYS"
 
 
 def detect_pre_breakout(full_df, adx_threshold=None):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     adx_threshold = adx_threshold or ADX_THRESHOLD
     last = full_df.iloc[-1]
     conditions = [
         last.get('vol_contraction', False),
         last.get('near_resistance', False),
         last.get('volume_pre_breakout', False),
-        last.get('supertrend_bullish', False),
+        last.get('st_med_bullish', False),  # Medium ST sebagai konfirmasi
         last.get('adx', 0) > adx_threshold,
         last.get('rsi', 50) > 50,  # momentum naik
     ]
@@ -63,12 +160,14 @@ def detect_pre_breakout(full_df, adx_threshold=None):
 
 
 def detect_accumulation(full_df):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     last = full_df.iloc[-1]
     latest = full_df.tail(10)
 
     price_range_tight = last.get('donchian_width_pct', 1) < 0.08
     adx_low = last.get('adx', 100) < 22
-    st_bullish = last.get('supertrend_bullish', False)
+    st_bullish = last.get('st_med_bullish', False)  # Medium ST untuk accumulation
     price_in_cloud = last.get('price_in_cloud', False)
 
     stock_regime = determine_stock_regime(full_df)
@@ -109,13 +208,21 @@ def detect_accumulation(full_df):
 
 
 def detect_early_reversal(full_df):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     last = full_df.iloc[-1]
     tail = full_df.tail(20)
 
-    st_bullish = last.get('supertrend_bullish', False)
-    st_prev = tail['supertrend_dir'].iloc[-2] if len(tail) >= 2 else -1
+    # Layered Entry: Fast flip + Slow filter
+    st_fast_bullish = last.get('st_fast_bullish', False)
+    st_fast_prev = tail['st_fast_dir'].iloc[-2] if 'st_fast_dir' in tail.columns and len(tail) >= 2 else -1
+    fast_flip = st_fast_bullish and st_fast_prev <= 0
 
-    fresh_st_flip = st_bullish and st_prev <= 0
+    # Slow ST sebagai gate - harus bullish untuk konfirmasi reversal
+    st_slow_bullish = last.get('st_slow_bullish', False)
+
+    # Entry reversal: fast flip DAN slow sudah bullish
+    fresh_st_flip = fast_flip and st_slow_bullish
 
     below_cloud = last.get('price_below_cloud', False)
     vol_spike = last.get('volume_expanding', False)
@@ -155,6 +262,8 @@ def detect_early_reversal(full_df):
 
 
 def detect_fresh_breakout(full_df, adx_threshold=None):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     adx_threshold = adx_threshold or ADX_THRESHOLD
     fresh_bars = FRESH_SIGNAL_BARS
     tail = full_df.tail(fresh_bars + 2)
@@ -168,7 +277,7 @@ def detect_fresh_breakout(full_df, adx_threshold=None):
     conditions = [
         has_fresh,
         last.get('volume_expanding', False),
-        last.get('supertrend_bullish', False),
+        last.get('st_layered_entry', False),  # Layered: slow gate + fast entry
         last.get('adx', 0) > adx_threshold,
         last.get('macd_bullish_cross', False) or last.get('macd_histogram', 0) > 0,  # MACD confirmation
     ]
@@ -178,6 +287,8 @@ def detect_fresh_breakout(full_df, adx_threshold=None):
 
 
 def detect_vcp(full_df):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     last = full_df.iloc[-1]
     tail = full_df.tail(40)
 
@@ -216,6 +327,8 @@ def detect_vcp(full_df):
 
 
 def detect_tight_base_breakout(full_df):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     last = full_df.iloc[-1]
     tail = full_df.tail(15)
 
@@ -236,7 +349,7 @@ def detect_tight_base_breakout(full_df):
 
     vol_dry = not last.get('volume_expanding', True)
 
-    st_bull = last.get('supertrend_bullish', False)
+    st_bull = last.get('st_med_bullish', False)  # Medium ST untuk base patterns
 
     # Leading: RSI netral = siap breakout
     rsi = last.get('rsi', 50)
@@ -269,7 +382,7 @@ def detect_base_on_base(full_df):
 
     vol_contracting = not last.get('volume_expanding', True)
 
-    st_bull = last.get('supertrend_bullish', False)
+    st_bull = last.get('st_med_bullish', False)  # Medium ST untuk base patterns
 
     # Leading: momentum confirmation
     rsi_healthy = last.get('rsi', 0) > 40
@@ -283,6 +396,8 @@ def detect_base_on_base(full_df):
 
 
 def detect_bull_flag(full_df):
+    if full_df is None or len(full_df) < 15:
+        return False, 0
     last = full_df.iloc[-1]
     tail = full_df.tail(30)
 
@@ -307,7 +422,7 @@ def detect_bull_flag(full_df):
     ma20 = last.get('ma20', None)
     above_ma20 = ma20 is not None and not pd.isna(ma20) and last['Close'] > ma20
 
-    st_bull = last.get('supertrend_bullish', False)
+    st_bull = last.get('st_med_bullish', False)  # Medium ST untuk flag patterns
 
     close_near_top = (recent_high - last['Close']) / recent_high < 0.03 if recent_high > 0 else False
 
@@ -322,6 +437,8 @@ def detect_bull_flag(full_df):
 
 
 def detect_pullback_ma20(full_df):
+    if full_df is None or len(full_df) < 2:
+        return False, 0
     last = full_df.iloc[-1]
     tail = full_df.tail(10)
 
@@ -360,6 +477,11 @@ def classify_setup_state(full_df, stock_regime, custom_params=None):
     p = custom_params or {}
     adx_thresh = p.get("adx_threshold", ADX_THRESHOLD)
 
+    # 0. Too Late Filter - block jika sudah terlambat
+    is_too_late, too_late_reason = check_too_late(full_df, custom_params)
+    if is_too_late:
+        return "NONE", False
+
     # 1. PRE_BREAKOUT (highest priority)
     pb_valid, pb_score = detect_pre_breakout(full_df, adx_thresh)
     if pb_valid and stock_regime != "BEAR":
@@ -377,22 +499,22 @@ def classify_setup_state(full_df, stock_regime, custom_params=None):
 
     # 4. BASE_ON_BASE
     bob_valid, bob_score = detect_base_on_base(full_df)
-    if bob_valid and stock_regime != "BEAR":  # Changed from BULL to not BEAR
+    if bob_valid and stock_regime != "BEAR":
         return "BASE_ON_BASE", True
 
     # 5. BULL_FLAG
     bf_valid, bf_score = detect_bull_flag(full_df)
-    if bf_valid:  # No regime filter - BULL_FLAG can occur in SIDEWAYS
+    if bf_valid:
         return "BULL_FLAG", True
 
     # 6. Fresh BREAKOUT
     fb_valid, fb_score = detect_fresh_breakout(full_df, adx_thresh)
-    if fb_valid and stock_regime != "BEAR":  # Changed from BULL to not BEAR
+    if fb_valid and stock_regime != "BEAR":
         return "BREAKOUT", True
 
     # 7. PULLBACK_MA20
     pb20_valid, pb20_score = detect_pullback_ma20(full_df)
-    if pb20_valid and stock_regime != "BEAR":  # Changed from BULL to not BEAR
+    if pb20_valid and stock_regime != "BEAR":
         return "PULLBACK_MA20", True
 
     # 8. ACCUMULATION

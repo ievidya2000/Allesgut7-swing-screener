@@ -353,7 +353,7 @@ def analyze_tp_targets(tp1, tp2, tp3, close, levels):
         near_resist = False
         resist_label = ""
         for r in levels["resistances"]:
-            if abs(r["price"] - tp_val) / tp_val < 0.02:
+            if tp_val > 0 and abs(r["price"] - tp_val) / tp_val < 0.02:
                 near_resist = True
                 resist_label = f"dekat resist {r['price']}"
                 break
@@ -387,6 +387,31 @@ def determine_timing(full_df, setup):
     stoch_k = last.get('stoch_k', 50)
     macd_hist = last.get('macd_histogram', 0)
 
+    # TOO LATE CHECK - block entry jika sudah terlambat
+    from signals import check_too_late, check_wait_pullback
+    from adaptive.config import load_adaptive_config
+    adaptive_params = load_adaptive_config()
+    is_too_late, too_late_reason = check_too_late(full_df, adaptive_params)
+    if is_too_late:
+        return {
+            "label": "TOO_LATE",
+            "detail": f"JANGAN MASUK - {too_late_reason}",
+            "target_price": None,
+            "confirmation_type": "",
+            "confirmation_value": None,
+        }
+
+    # WAIT PULLBACK CHECK - tunggu pullback jika sudah agak tinggi
+    should_wait, wait_reason = check_wait_pullback(full_df, adaptive_params)
+    if should_wait:
+        return {
+            "label": "WAIT_PULLBACK",
+            "detail": f"Tunggu pullback - {wait_reason}",
+            "target_price": last.get('ma20', 0),
+            "confirmation_type": "Price",
+            "confirmation_value": last.get('ma20', 0),
+        }
+
     if setup == "PRE_BREAKOUT":
         vol_ok = last.get('volume_pre_breakout', False)
         above_mid = last['Close'] > last.get('donchian_mid', 0)
@@ -418,7 +443,7 @@ def determine_timing(full_df, setup):
                 "confirmation_value": don_mid,
             }
         else:
-            vol_ma = last.get('volume_ma', 0)
+            vol_ma = last.get('vol_ma', 0)
             return {
                 "label": "WAIT_VOLUME",
                 "detail": f"Tunggu volume naik di atas {vol_ma:.0f}",
@@ -489,8 +514,10 @@ def determine_timing(full_df, setup):
             }
 
     elif setup == "EARLY_REVERSAL":
-        st_bullish = last.get('supertrend_bullish', False)
-        st_prev_bullish = prev.get('supertrend_dir', -1) > 0 if 'supertrend_dir' in prev else False
+        # Layered Entry: Fast flip + Slow filter
+        st_fast_bullish = last.get('st_fast_bullish', False)
+        st_fast_prev = prev.get('st_fast_dir', -1) > 0 if 'st_fast_dir' in prev else False
+        st_slow_bullish = last.get('st_slow_bullish', False)
         ma20 = last.get('ma20', 0)
 
         # Leading: Divergence detection
@@ -499,11 +526,13 @@ def determine_timing(full_df, setup):
         stoch_bull_cross = last.get('stoch_bullish_cross', False)
         macd_bull_cross = last.get('macd_bullish_cross', False)
 
-        fresh_st_flip = st_bullish and not st_prev_bullish
+        # Fast flip + Slow gate
+        fast_flip = st_fast_bullish and not st_fast_prev
+        fresh_st_flip = fast_flip and st_slow_bullish
         divergence_signal = (rsi_bull_div or macd_bull_div) and (stoch_bull_cross or macd_bull_cross)
 
         if fresh_st_flip or divergence_signal:
-            signal_type = "SuperTrend flip" if fresh_st_flip else "Divergence terdeteksi"
+            signal_type = "SuperTrend layered flip" if fresh_st_flip else "Divergence terdeteksi"
             return {
                 "label": "ENTRY_READY",
                 "detail": f"{signal_type}! Siap masuk (RSI {rsi:.0f})",
@@ -511,7 +540,7 @@ def determine_timing(full_df, setup):
                 "confirmation_type": "",
                 "confirmation_value": None,
             }
-        elif st_bullish:
+        elif st_fast_bullish and st_slow_bullish:
             return {
                 "label": "WAIT_PULLBACK",
                 "detail": f"Tunggu harga turun ke MA20 ({ma20:.0f})",
@@ -531,7 +560,7 @@ def determine_timing(full_df, setup):
         bb_width = last.get('bb_width', 0)
         bb_width_prev = prev.get('bb_width', 999) if len(full_df) >= 2 else 999
         contracting = bb_width < bb_width_prev
-        vol_ma = last.get('volume_ma', 0)
+        vol_ma = last.get('vol_ma', 0)
         vol_low = vol_ma > 0 and last.get('Volume', 0) < vol_ma * 0.8
         stoch_ready = stoch_k < 20 or rsi < 45
 
@@ -613,7 +642,7 @@ def determine_timing(full_df, setup):
     elif setup == "BULL_FLAG":
         ma20_val = last.get('ma20', last['Close'])
         near_ma20 = abs(last['Close'] - ma20_val) / last['Close'] < 0.05 if last['Close'] > 0 else False
-        vol_declining = last.get('Volume', 0) < last.get('volume_ma', last['Close']) * 0.8 if last.get('volume_ma', 0) > 0 else False
+        vol_declining = last.get('Volume', 0) < last.get('vol_ma', last['Close']) * 0.8 if last.get('vol_ma', 0) > 0 else False
         rsi_healthy = rsi > 40
 
         if near_ma20 and vol_declining and rsi_healthy:
@@ -853,8 +882,12 @@ def generate_deep_analysis(full_df, setup, close, atr_val, custom_params=None):
         entry_zone["strategy"] = "Tunggu konfirmasi masuk"
 
     # Recalculate profit/risk dari harga aktual
-    risk_pct = abs(close - sl_normal) / close * 100
-    profit_pct = abs(tp1 - close) / close * 100
+    if close > 0:
+        risk_pct = abs(close - sl_normal) / close * 100
+        profit_pct = abs(tp1 - close) / close * 100
+    else:
+        risk_pct = 0.0
+        profit_pct = 0.0
 
     chart = generate_ascii_chart(close, entry_zone, sl_normal, sl_wide, tp_analysis, levels)
 
