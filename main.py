@@ -16,6 +16,7 @@ from risk import calculate_tp_sl, simulate_tp_sl_probability
 from adaptive.config import load_adaptive_config
 from analysis import generate_deep_analysis
 from deep_analysis import generate_report as deep_report
+from patterns import detect_patterns, get_pattern_score
 from output import (
     print_banner, print_summary, print_header, print_subheader,
     print_analysis_box, sep
@@ -39,6 +40,10 @@ def run_screener():
     market_data = get_all_market_data(TICKERS)
     print(f"  Loaded {len(market_data)} tickers")
 
+    failed_tickers = [t for t in TICKERS if t not in market_data]
+    if failed_tickers:
+        print(f"  No data ({len(failed_tickers)}): {failed_tickers}")
+
     # 3. Scan
     print("\n[3/3] Scanning for setups...")
     print(sep("-"))
@@ -49,7 +54,7 @@ def run_screener():
 
     for ticker, df in market_data.items():
         try:
-            if len(df) < 100:
+            if len(df) < 50:
                 skipped["short_data"] += 1
                 continue
 
@@ -76,7 +81,14 @@ def run_screener():
             atr = last['atr_rm']
             adx = last['adx'] if pd.notna(last['adx']) else 0
 
-            if atr is None or pd.isna(atr) or atr / close < 0.001:
+            if atr is None or pd.isna(atr) or close <= 0 or atr / close < 0.001:
+                skipped["no_setup"] += 1
+                continue
+
+            # Volume Quality Filter
+            from config import MIN_DOLLAR_VOLUME
+            dollar_volume = last.get('dollar_volume', 0)
+            if pd.isna(dollar_volume) or dollar_volume < MIN_DOLLAR_VOLUME:
                 skipped["no_setup"] += 1
                 continue
 
@@ -104,7 +116,7 @@ def run_screener():
 
             selected_tp = {"TP1": tp1_an, "TP2": tp2_an, "TP3": tp3_an}.get(SELECTED_TP)
 
-            if selected_tp:
+            if selected_tp and close > 0:
                 profit_pct = ((selected_tp - close) / close) * 100
 
             # Monte Carlo
@@ -119,9 +131,15 @@ def run_screener():
                     "AVG_DAYS_TP1": None, "AVG_DAYS_TP2": None, "AVG_DAYS_TP3": None,
                 }
 
+            # Pattern Detection
+            patterns_list, pattern_meta = detect_patterns(df)
+            pattern_info = get_pattern_score(patterns_list)
+
             cloud = ("ABOVE" if last.get('price_above_cloud', False) else
                      "BELOW" if last.get('price_below_cloud', False) else "INSIDE")
-            trend = "BULLISH" if last.get('supertrend_bullish', False) else "BEARISH"
+            # Multi-ST consensus
+            st_count = int(last.get('st_bullish_count', 0))
+            trend = f"BULLISH ({st_count}/3)" if st_count >= 2 else f"BEARISH ({st_count}/3)"
 
             result = {
                 "Ticker": ticker,
@@ -155,6 +173,10 @@ def run_screener():
                 "Timing Confirm Type": timing.get("confirmation_type", ""),
                 "Timing Confirm Value": timing.get("confirmation_value"),
                 "Chart": chart,
+                "Pattern Score": pattern_info["score"],
+                "Pattern Bias": pattern_info["bias"],
+                "Bullish Patterns": pattern_info["bullish_count"],
+                "Bearish Patterns": pattern_info["bearish_count"],
             }
 
             results.append(result)
@@ -197,12 +219,22 @@ def run_screener():
     w_pf = ap.get("score_w_profit_pct", 0.5)
     w_sl = ap.get("score_w_prob_sl", -1.0)
     w_d3 = ap.get("score_w_avg_days", -0.3)
+    w_pattern = ap.get("score_w_pattern", 0.5)
+
+    # Use SELECTED_TP for score calculation (consistent with displayed profit)
+    tp_col = f"Prob_{SELECTED_TP}_float"
+    days_col = f"Avg Days {SELECTED_TP}"
+    if tp_col not in df_out.columns:
+        tp_col = "Prob_TP1_float"
+    if days_col not in df_out.columns:
+        days_col = "Avg Days TP1"
 
     df_out["TP_Likelihood"] = (
-        w_tp * df_out["Prob_TP3_float"]
-        + w_pf * (df_out["Prob_TP3_float"] / (df_out["Prob_SL_float"] + 0.01))
+        w_tp * df_out[tp_col]
+        + w_pf * (df_out[tp_col] / (df_out["Prob_SL_float"] + 0.01))
         + w_sl * df_out["Prob_SL_float"]
-        + w_d3 * df_out["Avg Days TP3"]
+        + w_d3 * df_out[days_col]
+        + w_pattern * df_out["Pattern Score"]
     )
     df_out["Score"] = df_out["TP_Likelihood"]
     df_out = df_out.sort_values("Score", ascending=False).reset_index(drop=True)
@@ -273,7 +305,7 @@ def run_screener():
 
     # Curated column order
     save_cols = [
-        "Ticker", "Signal", "Setup", "Price", "Stock Regime",
+        "Ticker", "Signal", "Setup", "Score", "Price", "Stock Regime",
         "Cloud", "Trend", "ADX", "ATR",
         "Stop Loss", "SL Wide", "TP1", "TP2", "TP3",
         "Entry Zone Low", "Entry Zone High", "Entry Strategy",
@@ -382,7 +414,7 @@ def cli_analyze(ticker):
     print(f"  Loading data for {ticker}...")
 
     cached = load_ticker_cache(ticker)
-    if cached is not None and len(cached) >= 100:
+    if cached is not None and len(cached) >= 50:
         df = cached
         print(f"  Loaded from cache ({len(df)} rows)")
     else:
@@ -409,5 +441,17 @@ def cli_analyze(ticker):
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "--analyze":
         cli_analyze(sys.argv[2].upper())
+    elif "--auto-trade" in sys.argv:
+        dry_run = "--dry-run" in sys.argv
+        df_out = run_screener()
+        if df_out is not None and not df_out.empty:
+            try:
+                from paper_trading.run_auto import run_auto_paper_trading
+                run_auto_paper_trading(df_out, dry_run=dry_run)
+            except ImportError as e:
+                print(f"\n  ❌ Paper trading module error: {e}")
+                print("  Install: pip install gspread google-auth")
+            except Exception as e:
+                print(f"\n  ❌ Auto-trade error: {e}")
     else:
         run_screener()
