@@ -17,7 +17,7 @@ def round_to_tick(price):
     try:
         price = float(price)
     except (ValueError, TypeError):
-        return price
+        return None
     
     if price < 200:
         tick = 1

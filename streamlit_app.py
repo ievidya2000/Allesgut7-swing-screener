@@ -18,12 +18,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import TICKERS, INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, SETUP_ORDER, SIGNAL_MAP, COLOR_MAP, MAX_DISPLAY, MC_HORIZON
+from paper_trading.config import SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES, MAX_AUTO_ORDERS_PER_DAY
+from paper_trading.auto_trader import filter_screener_results, auto_create_orders, calculate_position_size
+from paper_trading.gsheets_client import GSheetsClient
 from data import get_all_market_data, get_jkse_data, get_fundamental_data
 from indicators import calculate_full_indicators
 from signals import determine_market_regime, determine_stock_regime, classify_setup_state
 from risk import calculate_tp_sl, simulate_tp_sl_probability
 from analysis import generate_deep_analysis
-from patterns import detect_patterns
+from patterns import detect_patterns, get_pattern_score
 from deep_analysis import (
     multi_timeframe_analysis, volume_profile_analysis,
     trendline_analysis, risk_scenario_analysis, generate_interpretation
@@ -155,12 +158,12 @@ for key in ["screening_df", "market_data", "market_regime", "screening_done"]:
 # CACHED FUNCTIONS
 # ═══════════════════════════════════════════
 
-@st.cache_data(ttl=3600 * 18, show_spinner="Loading market data...")
+@st.cache_data(ttl=3600 * 8, show_spinner="Loading market data...")
 def cached_load_data(start_date=None, end_date=None):
     return get_all_market_data(TICKERS, start=start_date, end=end_date)
 
 
-@st.cache_data(ttl=3600 * 18, show_spinner="Loading IHSG...")
+@st.cache_data(ttl=3600 * 8, show_spinner="Loading IHSG...")
 def cached_jkse():
     return get_jkse_data()
 
@@ -209,7 +212,7 @@ def cached_run_screener(market_data_hash, market_regime):
             print(f"  Screening: {idx+1}/{total} tickers ({elapsed:.1f}s elapsed, ETA {eta:.0f}s)", flush=True)
 
         try:
-            if len(df) < 100:
+            if len(df) < 50:
                 skipped["short_data"] += 1
                 continue
             if isinstance(df.columns, pd.MultiIndex):
@@ -240,6 +243,13 @@ def cached_run_screener(market_data_hash, market_regime):
                 skipped["no_setup"] += 1
                 continue
 
+            # Volume Quality Filter
+            from config import MIN_DOLLAR_VOLUME
+            dollar_volume = last.get('dollar_volume', 0)
+            if pd.isna(dollar_volume) or dollar_volume < MIN_DOLLAR_VOLUME:
+                skipped["no_setup"] += 1
+                continue
+
             signal_type = SIGNAL_MAP.get(setup, "BUY")
             sl, tp1, tp2, tp3, profit_pct, risk_pct = calculate_tp_sl(close, atr, signal_type, adaptive_params)
             if sl is None or (risk_pct is not None and risk_pct < 0.1):
@@ -248,6 +258,10 @@ def cached_run_screener(market_data_hash, market_regime):
 
             analysis = generate_deep_analysis(full, setup, close, atr, adaptive_params)
             entry_zone = analysis["entry_zone"]
+
+            # Pattern detection for scoring
+            patterns_list, _ = detect_patterns(df)
+            pattern_info = get_pattern_score(patterns_list)
 
             prob = simulate_tp_sl_probability(df, close, analysis["sl_normal"], analysis["tp1"], analysis["tp2"], analysis["tp3"],
                                                markov_cache=markov_cache, markov_cache_key=ticker)
@@ -279,11 +293,13 @@ def cached_run_screener(market_data_hash, market_regime):
             donchian_upper_val = _safe_float(last.get("donchian_upper"))
 
             supertrend_line_val = _safe_float(last.get("supertrend_line"))
+            st_fast_line_val = _safe_float(last.get("st_fast_line"))
+            st_slow_line_val = _safe_float(last.get("st_slow_line"))
             plus_di_val = _safe_float(last.get("plus_di"))
             minus_di_val = _safe_float(last.get("minus_di"))
             di_sum_val = plus_di_val + minus_di_val
-            tenkan_val = _safe_float(last.get("tenkan_sen"))
-            kijun_val = _safe_float(last.get("kijun_sen"))
+            tenkan_val = _safe_float(last.get("tenkan"))
+            kijun_val = _safe_float(last.get("kijun"))
             senkou_a_val = _safe_float(last.get("senkou_a"))
             senkou_b_val = _safe_float(last.get("senkou_b"))
             cloud_top_val = max(senkou_a_val, senkou_b_val)
@@ -308,6 +324,10 @@ def cached_run_screener(market_data_hash, market_regime):
                 "atr": atr,
                 "atr_pct": atr / close * 100 if close > 0 else 0,
                 "supertrend_bullish": 1 if last.get("supertrend_bullish") else 0,
+                "st_fast_bullish": 1 if last.get("st_fast_bullish") else 0,
+                "st_slow_bullish": 1 if last.get("st_slow_bullish") else 0,
+                "st_bullish_count": int(last.get("st_bullish_count", 0)),
+                "st_layered_entry": 1 if last.get("st_layered_entry") else 0,
                 "price_above_cloud": 1 if last.get("price_above_cloud") else 0,
                 "donchian_width_pct": _safe_float(last.get("donchian_width_pct")),
                 "volume_expanding": 1 if last.get("volume_expanding") else 0,
@@ -322,7 +342,13 @@ def cached_run_screener(market_data_hash, market_regime):
                 "price_to_donchian_mid": close / donchian_mid_val if donchian_mid_val > 0 else 1.0,
                 "price_to_donchian_upper": close / donchian_upper_val if donchian_upper_val > 0 else 1.0,
                 "vol_ma_ratio": _safe_float(last.get("vol_ma_ratio")),
+                "dollar_volume": _safe_float(last.get("dollar_volume")),
+                "vol_quality": last.get("volume_quality", "Low"),
+                "vol_cv": _safe_float(last.get("vol_cv")),
+                "vol_per_atr": _safe_float(last.get("vol_per_atr")),
                 "price_to_supertrend": (close - supertrend_line_val) / max(close, 1) * 100 if supertrend_line_val > 0 else 0,
+                "price_to_st_fast": (close - st_fast_line_val) / max(close, 1) * 100 if st_fast_line_val > 0 else 0,
+                "price_to_st_slow": (close - st_slow_line_val) / max(close, 1) * 100 if st_slow_line_val > 0 else 0,
                 "di_spread": di_spread_val,
                 "atr_10_slope": _safe_float(last.get("atr_10_slope")),
                 "price_to_avwap": (close - avwap_val) / max(close, 1) * 100 if avwap_val > 0 else 0,
@@ -332,14 +358,38 @@ def cached_run_screener(market_data_hash, market_regime):
                 "volume_zscore": 0,
                 "plus_di": plus_di_val,
                 "minus_di": minus_di_val,
+                # Volume Pressure features
+                "obv_rising": 1 if last.get("obv_rising") else 0,
+                "ad_rising": 1 if last.get("ad_rising") else 0,
+                "delta_positive": 1 if last.get("delta_positive") else 0,
+                "volume_delta": np.clip(_safe_float(last.get("volume_delta")), -1e9, 1e9),
+                # Momentum features
+                "rsi": _safe_float(last.get("rsi")),
+                "rsi_oversold": 1 if last.get("rsi_oversold") else 0,
+                "stoch_k": _safe_float(last.get("stoch_k")),
+                "stoch_oversold": 1 if last.get("stoch_oversold") else 0,
+                "macd_histogram": _safe_float(last.get("macd_histogram")),
+                "macd_bullish_cross": 1 if last.get("macd_bullish_cross") else 0,
+                "rsi_bullish_div": 1 if last.get("rsi_bullish_div") else 0,
+                "macd_bullish_div": 1 if last.get("macd_bullish_div") else 0,
                 # Interaction features
                 "di_spread_x_score": di_spread_val * score_val,
+                "adx_x_di_spread": _safe_float(last.get("adx", 0)) * di_spread_val,
+                "cloud_x_supertrend": (cloud_top_val - cloud_bottom_val) / max(close, 1) * 100 * (1 if last.get("supertrend_bullish") else 0),
+                # Ratio features
+                "tp1_sl_ratio": _pf(prob.get("P_TP1")) / (p_sl_val + 0.01) if p_sl_val else 0,
+                "tp3_sl_ratio": _pf(prob.get("P_TP3")) / (p_sl_val + 0.01) if p_sl_val else 0,
+                # Pattern features
+                "pattern_score": pattern_info.get("score", 0),
+                "bullish_patterns": pattern_info.get("bullish_count", 0),
+                "bearish_patterns": pattern_info.get("bearish_count", 0),
                 # Encoded features
                 "setup_encoded": SETUP_ENCODING.get(setup, 0),
                 "regime_encoded": REGIME_ENCODING.get(market_regime, 3.0),
                 # Temporal features
                 "day_of_week": datetime.now().weekday(),
                 "month": datetime.now().month,
+                "quarter": (datetime.now().month - 1) // 3 + 1,
             }
 
             results.append({
@@ -402,12 +452,17 @@ def cached_run_screener(market_data_hash, market_regime):
         w_pf = ap.get("score_w_profit_pct", 0.5)
         w_sl = ap.get("score_w_prob_sl", -1.0)
         w_d3 = ap.get("score_w_avg_days", -0.3)
+        w_pattern = ap.get("score_w_pattern", 0.5)
+
+        pattern_col = "Pattern Score" if "Pattern Score" in df_out.columns else None
+        pattern_score = df_out[pattern_col] if pattern_col else 0
 
         df_out["TP_Likelihood"] = (
             w_tp * df_out.get("Prob_TP1_float", 0)
             + w_pf * (df_out.get("Prob_TP1_float", 0) / (df_out["Prob_SL_float"] + 0.01))
             + w_sl * df_out["Prob_SL_float"]
             + w_d3 * df_out["Avg Days TP1"]
+            + w_pattern * pattern_score
         )
         df_out["Score"] = df_out["TP_Likelihood"]
         bear_mask = df_out.get("BearFiltered", False)
@@ -547,7 +602,12 @@ def render_sidebar():
                 st.session_state.market_data = md
                 st.session_state.market_regime = mr
 
-            market_hash = hash(frozenset(md.keys()))
+            # Include data dates in hash to detect stale data
+            data_dates = []
+            for t, df in md.items():
+                if len(df) > 0:
+                    data_dates.append(str(df.index[-1]))
+            market_hash = hash((frozenset(md.keys()), tuple(sorted(data_dates))))
             df_out, skipped = cached_run_screener(market_hash, mr)
             st.session_state.screening_df = df_out
             st.session_state.screening_done = True
@@ -589,6 +649,27 @@ def render_sidebar():
                 st.session_state._filter_setups = selected_setups
 
                 st.slider("Min Score", 0, 200, 0, key="filt_min_score")
+
+                # Market Regime filter
+                st.markdown("**📊 Market Regime**")
+                regime_opts = ["BULL", "SIDEWAYS", "BEAR"]
+                selected_regimes = []
+                for r in regime_opts:
+                    emoji = {"BULL": "🟢", "SIDEWAYS": "🟡", "BEAR": "🔴"}[r]
+                    if st.checkbox(f"{emoji} {r}", value=True, key=f"filt_regime_{r}"):
+                        selected_regimes.append(r)
+                st.session_state._filter_regimes = selected_regimes
+
+                # Per-Setup Min Score override
+                with st.expander("⚙️ Per-Setup Min Score"):
+                    st.caption("Override global Min Score per setup")
+                    setup_scores = {}
+                    for s in SETUP_ORDER:
+                        default_val = int(SETUP_MIN_SCORE.get(s, 0))
+                        setup_scores[s] = st.slider(
+                            s, 0, 100, default_val, key=f"filt_score_{s}"
+                        )
+                    st.session_state._filter_setup_scores = setup_scores
 
                 timing_opts = ["All"] + [k for k, v in TIMING_MAP.items() if v[0] in ("🟢", "🟡")]
                 st.selectbox("Timing", timing_opts, key="filt_timing")
@@ -737,10 +818,28 @@ def render_results():
 
     # Apply filters
     filtered = df.copy()
+
+    # 1. Setup type filter
     if hasattr(st.session_state, "_filter_setups") and st.session_state._filter_setups:
         filtered = filtered[filtered["Setup"].isin(st.session_state._filter_setups)]
-    if st.session_state.get("filt_min_score", 0) > 0:
+
+    # 2. Market regime filter
+    if hasattr(st.session_state, "_filter_regimes") and st.session_state._filter_regimes:
+        if "Stock Regime" in filtered.columns:
+            filtered = filtered[filtered["Stock Regime"].isin(st.session_state._filter_regimes)]
+
+    # 3. Per-setup min score filter (overrides global min score)
+    setup_scores = st.session_state.get("_filter_setup_scores", {})
+    if setup_scores:
+        mask = pd.Series(True, index=filtered.index)
+        for setup_name, min_sc in setup_scores.items():
+            setup_mask = (filtered["Setup"] != setup_name) | (filtered["Score"] >= min_sc)
+            mask = mask & setup_mask
+        filtered = filtered[mask]
+    elif st.session_state.get("filt_min_score", 0) > 0:
         filtered = filtered[filtered["Score"] >= st.session_state.filt_min_score]
+
+    # 4. Timing filter
     if st.session_state.get("filt_timing", "All") != "All":
         filtered = filtered[filtered["Timing"] == st.session_state.filt_timing]
 
@@ -915,16 +1014,36 @@ def render_plotly_chart(full, da, levels):
         name='Price', showlegend=False,
     ), row=1, col=1)
 
-    # ── SuperTrend line + markers ──
+    # ── SuperTrend Multi-Instance lines + markers ──
+    # Fast ST (sensitif, untuk entry)
+    if 'st_fast_line' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df['Date'], y=df['st_fast_line'],
+            mode='lines', name='ST Fast (7,2)',
+            line=dict(color='#26a69a', width=1, dash='dot'),
+            showlegend=True,
+        ), row=1, col=1)
+
+    # Medium ST (default, konfirmasi)
     if 'supertrend_line' in df.columns:
         fig.add_trace(go.Scatter(
             x=df['Date'], y=df['supertrend_line'],
-            mode='lines', name='SuperTrend',
+            mode='lines', name='ST Med (10,3.5)',
             line=dict(color='orange', width=1.5),
             showlegend=True,
         ), row=1, col=1)
 
-        # Markers
+    # Slow ST (filter trend)
+    if 'st_slow_line' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df['Date'], y=df['st_slow_line'],
+            mode='lines', name='ST Slow (14,4)',
+            line=dict(color='#ef5350', width=2),
+            showlegend=True,
+        ), row=1, col=1)
+
+    # Markers pakai medium ST sebagai referensi utama
+    if 'supertrend_dir' in df.columns:
         bull_idx = df[df['supertrend_dir'] > 0].index
         bear_idx = df[df['supertrend_dir'] <= 0].index
         if len(bull_idx) > 0:
@@ -1305,6 +1424,7 @@ def render_analysis():
 
         # Compute all analyses first
         patterns, meta = detect_patterns(df_stock)
+        pattern_info = get_pattern_score(patterns)
         mta = multi_timeframe_analysis(ticker)
         vp = volume_profile_analysis(df_stock)
         tl = trendline_analysis(df_stock)
@@ -1379,8 +1499,15 @@ def render_analysis():
             else:
                 st.warning("Weekly data unavailable.")
 
-            daily_trend = "BULLISH" if last.get('supertrend_bullish', False) else "BEARISH" if last.get('price_below_cloud', False) else "SIDEWAYS"
-            st.metric("Daily Trend", daily_trend)
+            # Multi-ST consensus untuk daily trend
+            st_count = int(last.get('st_bullish_count', 0))
+            if st_count >= 2:
+                daily_trend = "BULLISH"
+            elif st_count == 0:
+                daily_trend = "BEARISH"
+            else:
+                daily_trend = "SIDEWAYS"
+            st.metric("Daily Trend", f"{daily_trend} ({st_count}/3 ST)")
             if wk.get("trend"):
                 align = "ALIGNED" if wk["trend"] == daily_trend else "CONFLICT"
                 st.metric("Alignment", align)
@@ -2484,6 +2611,199 @@ def render_journal():
 
 
 # ═══════════════════════════════════════════
+# AUTO TRADE TAB
+# ═══════════════════════════════════════════
+
+def render_auto_trade():
+    """Render auto-trade tab with live Google Sheets status, preview, and execution."""
+    st.subheader("🤖 Auto Trade")
+
+    # ── 1. Live Status from Google Sheets ──
+    st.markdown("#### 📡 Live Status")
+
+    client = GSheetsClient()
+    try:
+        client.connect()
+    except FileNotFoundError:
+        st.error("❌ service_account.json tidak ditemukan. Letakkan file di folder paper_trading.")
+        return
+    except Exception as e:
+        st.error(f"❌ Google Sheets connection failed: {e}")
+        return
+
+    try:
+        modal = client.get_modal()
+        open_positions = client.count_open_positions()
+        pending_count = client.count_pending_orders()
+        today_orders = client.count_today_orders_all()
+    except Exception as e:
+        st.error(f"❌ Gagal membaca data dari Google Sheets: {e}")
+        return
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("💰 Modal", f"Rp {modal:,.0f}")
+    col2.metric("📊 Positions", f"{open_positions}/{MAX_POSITIONS}")
+    col3.metric("📋 Pending", pending_count)
+    col4.metric("📅 Today Orders", f"{today_orders}/{MAX_AUTO_ORDERS_PER_DAY}")
+
+    st.divider()
+
+    # ── 2. Filter Configuration ──
+    st.markdown("#### 🔎 Filter")
+
+    df = st.session_state.screening_df
+    if df is None or df.empty or "Setup" not in df.columns:
+        st.info("Run the screener first.")
+        return
+
+    # Option: use Results tab filters or manual
+    use_results_filters = st.checkbox("Ikuti filter Results tab", value=True, key="at_use_results")
+
+    if use_results_filters:
+        # Reuse filtered data from Results tab (apply same filters)
+        filtered = df.copy()
+        if hasattr(st.session_state, "_filter_setups") and st.session_state._filter_setups:
+            filtered = filtered[filtered["Setup"].isin(st.session_state._filter_setups)]
+        if hasattr(st.session_state, "_filter_regimes") and st.session_state._filter_regimes:
+            if "Stock Regime" in filtered.columns:
+                filtered = filtered[filtered["Stock Regime"].isin(st.session_state._filter_regimes)]
+        setup_scores = st.session_state.get("_filter_setup_scores", {})
+        if setup_scores:
+            mask = pd.Series(True, index=filtered.index)
+            for setup_name, min_sc in setup_scores.items():
+                setup_mask = (filtered["Setup"] != setup_name) | (filtered["Score"] >= min_sc)
+                mask = mask & setup_mask
+            filtered = filtered[mask]
+        elif st.session_state.get("filt_min_score", 0) > 0:
+            filtered = filtered[filtered["Score"] >= st.session_state.filt_min_score]
+        if st.session_state.get("filt_timing", "All") != "All":
+            filtered = filtered[filtered["Timing"] == st.session_state.filt_timing]
+    else:
+        # Manual filters
+        mcol1, mcol2 = st.columns(2)
+        with mcol1:
+            at_min_score = st.slider("Min Score", 0, 100, 15, key="at_min_score")
+        with mcol2:
+            timing_opts = ["All"] + [k for k, v in TIMING_MAP.items() if v[0] in ("🟢", "🟡")]
+            at_timing = st.selectbox("Timing", timing_opts, key="at_timing")
+        filtered = df.copy()
+        if at_min_score > 0:
+            filtered = filtered[filtered["Score"] >= at_min_score]
+        if at_timing != "All":
+            filtered = filtered[filtered["Timing"] == at_timing]
+
+    if filtered.empty:
+        st.warning("Tidak ada hasil setelah filter.")
+        return
+
+    st.caption(f"Hasil filter: {len(filtered)} dari {len(df)} total")
+
+    st.divider()
+
+    # ── 3. Preview Orders ──
+    st.markdown("#### 📋 Preview Orders")
+
+    try:
+        open_tickers = client.get_open_tickers()
+        pending_tickers = client.get_pending_tickers()
+    except Exception as e:
+        st.error(f"❌ Gagal mengambil data open/pending: {e}")
+        return
+
+    results_list = filtered.to_dict("records")
+    to_execute, to_watch, skipped = filter_screener_results(
+        results_list,
+        open_tickers=open_tickers,
+        pending_tickers=pending_tickers,
+        today_orders=today_orders,
+        open_positions=open_positions,
+        max_positions=MAX_POSITIONS,
+    )
+
+    # Preview columns
+    preview_cols = ["Ticker", "Setup", "Score", "Price", "Timing", "Stock Regime"]
+
+    if to_execute:
+        st.success(f"**✅ Execute ({len(to_execute)}):**")
+        exec_df = pd.DataFrame(to_execute)
+        exec_avail = [c for c in preview_cols if c in exec_df.columns]
+        st.dataframe(exec_df[exec_avail], use_container_width=True, hide_index=True)
+
+    if to_watch:
+        st.info(f"**⏳ Watch ({len(to_watch)}):**")
+        watch_df = pd.DataFrame(to_watch)
+        watch_avail = [c for c in preview_cols if c in watch_df.columns]
+        st.dataframe(watch_df[watch_avail], use_container_width=True, hide_index=True)
+
+    if skipped:
+        with st.expander(f"**⏭️ Skip ({len(skipped)})**"):
+            skip_df = pd.DataFrame(skipped)
+            st.dataframe(skip_df, use_container_width=True, hide_index=True)
+
+    if not to_execute and not to_watch:
+        st.info("Tidak ada order yang bisa dieksekusi.")
+        return
+
+    st.divider()
+
+    # ── 4. Execute ──
+    st.markdown("#### 🚀 Execute")
+
+    dry_run = st.checkbox("🧪 Dry Run (simulate only, tidak buat order)", value=True, key="at_dry_run")
+
+    if st.button("🚀 Execute Auto Trade", type="primary", key="at_execute"):
+        if not to_execute:
+            st.warning("Tidak ada order untuk dieksekusi.")
+        else:
+            with st.spinner("Mengeksekusi order..."):
+                summary = auto_create_orders(
+                    results_list,
+                    client=client,
+                    dry_run=dry_run,
+                )
+
+            if summary:
+                st.session_state._auto_trade_summary = summary
+
+                if summary.get("orders_created"):
+                    st.success(f"**✅ Berhasil:** {len(summary['orders_created'])} order")
+                    for order in summary["orders_created"]:
+                        dry_tag = " (dry run)" if order.get("dry_run") else ""
+                        st.write(
+                            f"  • **{order['ticker']}** — {order['qty']} lots @ Rp {order['entry']:.2f}{dry_tag}"
+                        )
+
+                if summary.get("errors"):
+                    st.error(f"**❌ Error:** {len(summary['errors'])} order gagal")
+                    for err in summary["errors"]:
+                        st.write(f"  • **{err['ticker']}** — {err['error']}")
+
+                # Refresh live status
+                st.rerun()
+            else:
+                st.error("Execution failed. Silakan cek log.")
+
+    # ── 5. Show last execution summary ──
+    if "_auto_trade_summary" in st.session_state:
+        summary = st.session_state._auto_trade_summary
+        if summary.get("orders_created") or summary.get("errors"):
+            st.divider()
+            st.markdown("#### 📊 Last Execution Summary")
+            scol1, scol2, scol3, scol4 = st.columns(4)
+            scol1.metric("Scanned", summary.get("total_scanned", 0))
+            scol2.metric("Execute", summary.get("to_execute", 0))
+            scol3.metric("Watch", summary.get("to_watch", 0))
+            scol4.metric("Skipped", summary.get("skipped", 0))
+
+    # DYOR Disclaimer
+    st.markdown("""
+    <div class="dyor-disclaimer">
+        ⚠️ Think First. Trade Second. DYOR - Do Your Own Research
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════
 
@@ -2491,7 +2811,7 @@ def main():
     render_sidebar()
 
     if st.session_state.screening_done and st.session_state.screening_df is not None:
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📋 Results", "🎯 Trade Assistant", "📈 Performance"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "📋 Results", "🎯 Trade Assistant", "🤖 Auto Trade", "📈 Performance"])
         with tab1:
             render_dashboard()
         with tab2:
@@ -2499,6 +2819,8 @@ def main():
         with tab3:
             render_analysis()
         with tab4:
+            render_auto_trade()
+        with tab5:
             render_performance()
     else:
         # ── Professional Landing Page ──
