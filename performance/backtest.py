@@ -4,12 +4,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 from functools import lru_cache
 
-from config import TICKERS, MC_HORIZON, SIGNAL_MAP
+from config import TICKERS, MC_HORIZON, SIGNAL_MAP, MIN_DOLLAR_VOLUME
 from data import get_all_market_data, get_jkse_data
 from indicators import calculate_full_indicators
 from signals import determine_market_regime, determine_stock_regime, classify_setup_state
 from risk import calculate_tp_sl
 from analysis import generate_deep_analysis
+from patterns import detect_patterns, get_pattern_score
 from performance.journal import (
     init_db, log_prediction, log_trade_result, log_predictions_batch,
     update_prediction_status, get_pending_predictions
@@ -103,7 +104,7 @@ def _precompute_all_indicators(market_data, adaptive_params, chunk_size=100):
     for chunk_start in range(0, len(tickers), chunk_size):
         chunk = tickers[chunk_start:chunk_start + chunk_size]
         for ticker, df in chunk:
-            if len(df) >= 100:
+            if len(df) >= 50:
                 try:
                     full = calculate_full_indicators(df, adaptive_params)
                     indicator_cache[ticker] = full
@@ -177,6 +178,11 @@ def run_screening_at_date(market_data, signal_date, market_regime=None, jkse_df=
             if atr is None or pd.isna(atr) or atr / close < 0.001:
                 continue
 
+            # Volume Quality Filter
+            dollar_volume = last.get('dollar_volume', 0)
+            if pd.isna(dollar_volume) or dollar_volume < MIN_DOLLAR_VOLUME:
+                continue
+
             signal_type = SIGNAL_MAP[setup]
             sl, tp1, tp2, tp3, profit_pct, risk_pct = calculate_tp_sl(close, atr, signal_type, adaptive_params)
             if sl is None:
@@ -241,12 +247,24 @@ def run_screening_at_date(market_data, signal_date, market_regime=None, jkse_df=
             w_pf = adaptive_params.get("score_w_profit_pct", 0.5)
             w_sl = adaptive_params.get("score_w_prob_sl", -1.0)
             w_d1 = adaptive_params.get("score_w_avg_days", -0.3)
+            w_pattern = adaptive_params.get("score_w_pattern", 0.5)
+
+            # Pattern scoring
+            try:
+                df_for_pattern = market_data[ticker]
+                df_pat_slice = df_for_pattern[df_for_pattern.index <= signal_date]
+                patterns_list, _ = detect_patterns(df_pat_slice)
+                pattern_info = get_pattern_score(patterns_list)
+                pattern_score = pattern_info.get("score", 0)
+            except Exception:
+                pattern_score = 0
 
             score = round(
                 w_tp * p_tp1
                 + w_pf * (p_tp1 / (p_sl + 0.01))
                 + w_sl * p_sl
-                + w_d1 * avg_d1,
+                + w_d1 * avg_d1
+                + w_pattern * pattern_score,
                 2
             )
 
