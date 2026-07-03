@@ -68,7 +68,7 @@ TICKERS = ["AADI.JK", "AALI.JK", "ABBA.JK", "ABDA.JK", "ABMM.JK", "ACES.JK", "AC
 
 # Data Download
 CACHE_DIR = Path(__file__).parent / "cache_yfinance"
-CACHE_MAX_AGE_HOURS = 18
+CACHE_MAX_AGE_HOURS = 8
 BATCH_SIZE = 60
 DOWNLOAD_PERIOD = "1y"
 DOWNLOAD_INTERVAL = "1d"
@@ -81,9 +81,22 @@ ICHIMOKU_SENKOU_B = 52
 # Donchian
 DONCHIAN_PERIOD = 20
 
-# SuperTrend
-ATR_LENGTH = 10
-ATR_MULTIPLIER = 3.5
+# SuperTrend - Multi Instance (Layered Entry)
+# Fast: sensitif untuk entry awal
+ST_FAST_PERIOD = 7
+ST_FAST_MULTIPLIER = 2.0
+
+# Medium: konfirmasi (default lama)
+ST_MED_PERIOD = 10
+ST_MED_MULTIPLIER = 3.5
+
+# Slow: filter trend utama (gate)
+ST_SLOW_PERIOD = 14
+ST_SLOW_MULTIPLIER = 4.0
+
+# Backward compatibility - default pakai medium
+ATR_LENGTH = ST_MED_PERIOD
+ATR_MULTIPLIER = ST_MED_MULTIPLIER
 
 # ADX
 ADX_LENGTH = 14
@@ -94,6 +107,11 @@ AVWAP_LOOKBACK = 5
 
 # Volume
 VOLUME_MA_PERIOD = 20
+
+# Volume Quality
+MIN_DOLLAR_VOLUME = 500_000_000  # Rp 500 juta/hari minimum
+VOL_PER_ATR_MIN = 100_000  # Minimum dollar volume per ATR point
+MAX_VOL_CV = 1.5  # Maximum coefficient of variation for volume stability
 
 # Volume Pressure
 OBV_MA_PERIOD = 20
@@ -152,6 +170,13 @@ VOLUME_RISING_LOOKBACK = 3
 
 # Fresh Signal
 FRESH_SIGNAL_BARS = 3
+
+# Too Late Filter - Extension & Distribution Detection
+MAX_RUNUP = 0.30           # Max 30% run-up dari low 50 hari
+MAX_RUNUP_BLOCK = 0.50     # Block entry jika run-up > 50%
+MAX_PRICE_TO_MA20 = 0.15   # Max 15% di atas MA20
+MAX_PRICE_TO_AVWAP = 0.10  # Max 10% di atas AVWAP
+STOCH_OVERBOUGHT = 80      # Stochastic overbought threshold
 
 # Monte Carlo
 MC_N_SIM = 1000

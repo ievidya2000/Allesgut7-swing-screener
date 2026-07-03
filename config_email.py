@@ -2,7 +2,10 @@
 
 import os
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 EMAIL_CONFIG_FILE = Path(__file__).parent / "email_config.json"
 
@@ -57,9 +60,11 @@ def load_email_config():
         try:
             with open(EMAIL_CONFIG_FILE, 'r') as f:
                 file_config = json.load(f)
-            config.update(file_config)
-        except Exception:
-            pass
+            if file_config.get("smtp_username"):
+                logger.warning("Email config loaded from local file. Use env vars or Streamlit secrets in production.")
+                config.update(file_config)
+        except Exception as e:
+            logger.debug(f"Could not load email config file: {e}")
 
     return config
 

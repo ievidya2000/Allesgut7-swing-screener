@@ -1,6 +1,8 @@
 # Credentials
 email_config.json
 .streamlit/secrets.toml
+service_account.json
+**/service_account*.json
 
 # Database
 *.db
