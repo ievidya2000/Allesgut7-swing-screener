@@ -504,51 +504,66 @@ def train_ranker(df, n_trials=15):
 
     print(f"\n[6/7] Training TabNet (3 configs, 50 epochs each)...")
     tabnet_results = {}
-    for config_name in TABNET_CONFIGS.keys():
-        tabnet_model, tabnet_prob = train_tabnet(
-            X_train, y_train_cls, X_test, y_test_cls,
-            n_epochs=50, config_name=config_name
-        )
-        tabnet_auc = roc_auc_score(y_test_cls, tabnet_prob)
-        tabnet_results[config_name] = {
-            "model": tabnet_model,
-            "prob": tabnet_prob,
-            "auc": tabnet_auc,
-        }
+    skip_tabnet = len(set(y_test_cls)) < 2
+    if skip_tabnet:
+        print("  WARNING: Test set has only one class. Skipping TabNet training.")
+        best_tabnet_model = None
+        best_tabnet_prob = np.zeros(len(y_test_cls))
+        best_tabnet_auc = 0.0
+        best_tabnet_name = "skipped"
+    else:
+        for config_name in TABNET_CONFIGS.keys():
+            tabnet_model, tabnet_prob = train_tabnet(
+                X_train, y_train_cls, X_test, y_test_cls,
+                n_epochs=50, config_name=config_name
+            )
+            tabnet_auc = roc_auc_score(y_test_cls, tabnet_prob)
+            tabnet_results[config_name] = {
+                "model": tabnet_model,
+                "prob": tabnet_prob,
+                "auc": tabnet_auc,
+            }
 
-    best_tabnet_config = max(tabnet_results.items(), key=lambda x: x[1]["auc"])
-    best_tabnet_name = best_tabnet_config[0]
-    best_tabnet_auc = best_tabnet_config[1]["auc"]
-    best_tabnet_prob = best_tabnet_config[1]["prob"]
-    best_tabnet_model = best_tabnet_config[1]["model"]
+        best_tabnet_config = max(tabnet_results.items(), key=lambda x: x[1]["auc"])
+        best_tabnet_name = best_tabnet_config[0]
+        best_tabnet_auc = best_tabnet_config[1]["auc"]
+        best_tabnet_prob = best_tabnet_config[1]["prob"]
+        best_tabnet_model = best_tabnet_config[1]["model"]
 
     print(f"\n  Best TabNet config: {best_tabnet_name} (AUC: {best_tabnet_auc:.4f})")
 
     print(f"\n[7/7] Creating ensemble with TabNet...")
-    ensemble_with_tabnet_prob = (
-        0.05 * gbm_prob +
-        0.10 * xgb_ens_prob +
-        0.10 * lgbm_ens_prob +
-        0.45 * rf_prob +
-        0.10 * lr_prob +
-        0.20 * best_tabnet_prob
-    )
-    ensemble_with_tabnet_auc = roc_auc_score(y_test_cls, ensemble_with_tabnet_prob)
-
-    print(f"  Ensemble (without TabNet): {ensemble_auc:.4f}")
-    print(f"  Ensemble (with TabNet): {ensemble_with_tabnet_auc:.4f}")
-
-    if ensemble_with_tabnet_auc >= ensemble_auc:
-        print(f"  ✓ Using ensemble with TabNet (+{ensemble_with_tabnet_auc - ensemble_auc:.4f})")
-        final_ensemble_prob = ensemble_with_tabnet_prob
-        final_ensemble_auc = ensemble_with_tabnet_auc
-        use_tabnet = True
-        ensemble_weights = [0.05, 0.10, 0.10, 0.45, 0.10, 0.20]
-    else:
-        print(f"  ✓ Using ensemble without TabNet (+{ensemble_auc - ensemble_with_tabnet_auc:.4f})")
+    if skip_tabnet:
+        print("  TabNet skipped. Using ensemble without TabNet.")
         final_ensemble_prob = ensemble_prob
         final_ensemble_auc = ensemble_auc
         use_tabnet = False
+        ensemble_weights = [0.10, 0.20, 0.20, 0.30, 0.20]
+    else:
+        ensemble_with_tabnet_prob = (
+            0.05 * gbm_prob +
+            0.10 * xgb_ens_prob +
+            0.10 * lgbm_ens_prob +
+            0.45 * rf_prob +
+            0.10 * lr_prob +
+            0.20 * best_tabnet_prob
+        )
+        ensemble_with_tabnet_auc = roc_auc_score(y_test_cls, ensemble_with_tabnet_prob)
+
+        print(f"  Ensemble (without TabNet): {ensemble_auc:.4f}")
+        print(f"  Ensemble (with TabNet): {ensemble_with_tabnet_auc:.4f}")
+
+        if ensemble_with_tabnet_auc >= ensemble_auc:
+            print(f"  ✓ Using ensemble with TabNet (+{ensemble_with_tabnet_auc - ensemble_auc:.4f})")
+            final_ensemble_prob = ensemble_with_tabnet_prob
+            final_ensemble_auc = ensemble_with_tabnet_auc
+            use_tabnet = True
+            ensemble_weights = [0.05, 0.10, 0.10, 0.45, 0.10, 0.20]
+        else:
+            print(f"  ✓ Using ensemble without TabNet (+{ensemble_auc - ensemble_with_tabnet_auc:.4f})")
+            final_ensemble_prob = ensemble_prob
+            final_ensemble_auc = ensemble_auc
+            use_tabnet = False
         ensemble_weights = [0.05, 0.10, 0.10, 0.60, 0.15]
 
     final_ensemble_pred = (final_ensemble_prob >= 0.5).astype(int)
@@ -599,7 +614,7 @@ def train_ranker(df, n_trials=15):
         "classifier_accuracy": float(accuracy),
         "classifier_auc": float(auc),
         "ensemble_auc_without_tabnet": float(ensemble_auc),
-        "ensemble_auc_with_tabnet": float(ensemble_with_tabnet_auc),
+        "ensemble_auc_with_tabnet": float(final_ensemble_auc if skip_tabnet else ensemble_with_tabnet_auc),
         "final_ensemble_auc": float(final_ensemble_auc),
         "final_ensemble_accuracy": float(final_ensemble_accuracy),
         "tabnet_results": {k: v["auc"] for k, v in tabnet_results.items()},

@@ -149,6 +149,10 @@ def _extract_indicator_features(full, last, analysis, market_regime, stock_regim
         "atr": _safe(last.get("atr_rm")),
         "atr_pct": _safe(last.get("atr_rm")) / max(_safe(last.get("Close")), 1) * 100,
         "supertrend_bullish": 1 if last.get("supertrend_bullish") else 0,
+        "st_fast_bullish": 1 if last.get("st_fast_bullish") else 0,
+        "st_slow_bullish": 1 if last.get("st_slow_bullish") else 0,
+        "st_bullish_count": int(last.get("st_bullish_count", 0)),
+        "st_layered_entry": 1 if last.get("st_layered_entry") else 0,
         "price_above_cloud": 1 if last.get("price_above_cloud") else 0,
         "price_in_cloud": 1 if last.get("price_in_cloud") else 0,
         "donchian_width_pct": _safe(last.get("donchian_width_pct")),
@@ -183,6 +187,26 @@ def _extract_indicator_features(full, last, analysis, market_regime, stock_regim
         "macd_bullish_cross": 1 if last.get("macd_bullish_cross") else 0,
         "rsi_bullish_div": 1 if last.get("rsi_bullish_div") else 0,
         "macd_bullish_div": 1 if last.get("macd_bullish_div") else 0,
+        # SuperTrend distance features
+        "price_to_supertrend": (_safe(last.get("Close")) - _safe(last.get("supertrend_line"))) / max(_safe(last.get("Close")), 1) * 100 if _safe(last.get("supertrend_line")) > 0 else 0,
+        "price_to_st_fast": (_safe(last.get("Close")) - _safe(last.get("st_fast_line"))) / max(_safe(last.get("Close")), 1) * 100 if _safe(last.get("st_fast_line")) > 0 else 0,
+        "price_to_st_slow": (_safe(last.get("Close")) - _safe(last.get("st_slow_line"))) / max(_safe(last.get("Close")), 1) * 100 if _safe(last.get("st_slow_line")) > 0 else 0,
+        # DI spread and ATR slope
+        "di_spread": (_safe(last.get("plus_di")) - _safe(last.get("minus_di"))) / max(_safe(last.get("plus_di")) + _safe(last.get("minus_di")), 1),
+        "atr_10_slope": np.clip(_safe(last.get("atr_10_slope")), -10, 10),
+        # AVWAP and Ichimoku
+        "price_to_avwap": (_safe(last.get("Close")) - _safe(last.get("avwap"))) / max(_safe(last.get("Close")), 1) * 100 if _safe(last.get("avwap")) > 0 else 0,
+        "tenkan_kijun_spread": (_safe(last.get("tenkan")) - _safe(last.get("kijun"))) / max(abs(_safe(last.get("kijun"))), 1) * 100,
+        "cloud_thickness": (_safe(last.get("senkou_a")) - _safe(last.get("senkou_b"))) / max(_safe(last.get("Close")), 1) * 100,
+        # Return and volume zscore
+        "return_5d": _safe(last.get("Close")) / max(_safe(last.get("Close", 1)), 1) - 1,
+        "volume_zscore": 0,
+        "plus_di": _safe(last.get("plus_di")),
+        "minus_di": _safe(last.get("minus_di")),
+        # Volume Quality features
+        "dollar_volume": _safe(last.get("dollar_volume")),
+        "vol_cv": _safe(last.get("vol_cv")),
+        "vol_per_atr": _safe(last.get("vol_per_atr")),
     }
 
     ez = analysis.get("entry_zone", {})

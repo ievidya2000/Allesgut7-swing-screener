@@ -7,19 +7,22 @@ from indicators import calculate_full_indicators
 from adaptive.config import load_adaptive_config
 from performance.journal import _get_conn, init_db
 from signals import determine_market_regime
+from patterns import detect_patterns, get_pattern_score
 from utils.date_utils import normalize_screen_date
 
 
 FEATURE_COLUMNS = [
     "score", "prob_tp1", "prob_tp2", "prob_tp3", "prob_sl",
     "avg_days_tp1", "adx", "atr",
-    "atr_pct", "supertrend_bullish", "price_above_cloud",
+    "atr_pct", "supertrend_bullish", "st_fast_bullish", "st_slow_bullish",
+    "st_bullish_count", "st_layered_entry", "price_above_cloud",
     "donchian_width_pct", "volume_expanding",
     "adx_rising", "ma20_slope", "ma20_above_ma50",
     "consecutive_inside", "bb_width", "dw_percentile_50",
     "fresh_breakout", "volume_pre_breakout", "price_to_donchian_mid",
     "price_to_donchian_upper", "vol_ma_ratio",
-    "price_to_supertrend", "di_spread", "atr_10_slope",
+    "price_to_supertrend", "price_to_st_fast", "price_to_st_slow",
+    "di_spread", "atr_10_slope",
     "price_to_avwap", "tenkan_kijun_spread", "cloud_thickness",
     "return_5d", "volume_zscore", "plus_di", "minus_di",
     "di_spread_x_score", "adx_x_di_spread", "cloud_x_supertrend",
@@ -32,6 +35,8 @@ FEATURE_COLUMNS = [
     "rsi", "rsi_oversold", "stoch_k", "stoch_oversold",
     "macd_histogram", "macd_bullish_cross",
     "rsi_bullish_div", "macd_bullish_div",
+    "pattern_score", "bullish_patterns", "bearish_patterns",
+    "dollar_volume", "vol_cv", "vol_per_atr",
 ]
 
 RETURN_THRESHOLD = 30
@@ -88,11 +93,13 @@ def extract_indicator_features(ticker, signal_date_str, market_data, adaptive_pa
 
     c = _safe(last.get("Close"))
     supertrend_line = _safe(last.get("supertrend_line"))
+    st_fast_line = _safe(last.get("st_fast_line"))
+    st_slow_line = _safe(last.get("st_slow_line"))
     plus_di = _safe(last.get("plus_di"))
     minus_di = _safe(last.get("minus_di"))
     di_sum = plus_di + minus_di
-    tenkan = _safe(last.get("tenkan_sen"))
-    kijun = _safe(last.get("kijun_sen"))
+    tenkan = _safe(last.get("tenkan"))
+    kijun = _safe(last.get("kijun"))
     senkou_a = _safe(last.get("senkou_a"))
     senkou_b = _safe(last.get("senkou_b"))
     cloud_top = max(senkou_a, senkou_b)
@@ -106,6 +113,10 @@ def extract_indicator_features(ticker, signal_date_str, market_data, adaptive_pa
         "atr": _safe(last.get("atr_rm")),
         "atr_pct": _safe(last.get("atr_rm")) / max(c, 1) * 100,
         "supertrend_bullish": 1 if last.get("supertrend_bullish") else 0,
+        "st_fast_bullish": 1 if last.get("st_fast_bullish") else 0,
+        "st_slow_bullish": 1 if last.get("st_slow_bullish") else 0,
+        "st_bullish_count": int(last.get("st_bullish_count", 0)),
+        "st_layered_entry": 1 if last.get("st_layered_entry") else 0,
         "price_above_cloud": 1 if last.get("price_above_cloud") else 0,
         "donchian_width_pct": _safe(last.get("donchian_width_pct")),
         "volume_expanding": 1 if last.get("volume_expanding") else 0,
@@ -121,6 +132,8 @@ def extract_indicator_features(ticker, signal_date_str, market_data, adaptive_pa
         "price_to_donchian_upper": c / max(_safe(last.get("donchian_upper")), 1),
         "vol_ma_ratio": _safe(last.get("vol_ma_ratio")),
         "price_to_supertrend": (c - supertrend_line) / max(c, 1) * 100 if supertrend_line > 0 else 0,
+        "price_to_st_fast": (c - st_fast_line) / max(c, 1) * 100 if st_fast_line > 0 else 0,
+        "price_to_st_slow": (c - st_slow_line) / max(c, 1) * 100 if st_slow_line > 0 else 0,
         "di_spread": (plus_di - minus_di) / max(di_sum, 1),
         "atr_10_slope": np.clip(_safe(last.get("atr_10_slope")), -10, 10),
         "price_to_avwap": (c - avwap) / max(c, 1) * 100 if avwap > 0 else 0,
@@ -145,6 +158,23 @@ def extract_indicator_features(ticker, signal_date_str, market_data, adaptive_pa
         "rsi_bullish_div": 1 if last.get("rsi_bullish_div") else 0,
         "macd_bullish_div": 1 if last.get("macd_bullish_div") else 0,
     }
+
+    # Pattern features
+    try:
+        patterns_list, _ = detect_patterns(df_slice)
+        pattern_info = get_pattern_score(patterns_list)
+        features["pattern_score"] = pattern_info["score"]
+        features["bullish_patterns"] = pattern_info["bullish_count"]
+        features["bearish_patterns"] = pattern_info["bearish_count"]
+    except Exception:
+        features["pattern_score"] = 0.0
+        features["bullish_patterns"] = 0
+        features["bearish_patterns"] = 0
+
+    # Volume Quality features
+    features["dollar_volume"] = _safe(last.get("dollar_volume"))
+    features["vol_cv"] = _safe(last.get("vol_cv"))
+    features["vol_per_atr"] = _safe(last.get("vol_per_atr"))
 
     return features
 
