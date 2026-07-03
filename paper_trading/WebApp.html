@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paper Trading IDX</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+    .header { background: #1a73e8; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .header .refresh-btn { background: rgba(255,255,255,0.2); border: none; color: white; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .header .refresh-btn:hover { background: rgba(255,255,255,0.3); }
+    .header .timestamp { font-size: 12px; opacity: 0.8; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; background: white; padding: 4px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex-wrap: wrap; }
+    .tab { padding: 10px 16px; border: none; background: transparent; cursor: pointer; font-size: 13px; font-weight: 500; border-radius: 6px; transition: all 0.2s; }
+    .tab:hover { background: #f0f0f0; }
+    .tab.active { background: #1a73e8; color: white; }
+    .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .card h2 { font-size: 16px; margin-bottom: 16px; color: #1a73e8; }
+    .grid { display: grid; gap: 20px; }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+    .metric { text-align: center; padding: 12px; }
+    .metric .value { font-size: 26px; font-weight: 700; }
+    .metric .label { font-size: 11px; color: #666; margin-top: 4px; }
+    .positive { color: #34a853; }
+    .negative { color: #ea4335; }
+    .neutral { color: #666; }
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #f8f9fa; padding: 10px; text-align: left; font-weight: 600; border-bottom: 2px solid #e0e0e0; }
+    td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; }
+    tr:hover { background: #f8f9fa; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .badge-buy { background: #e6f4ea; color: #1e8e3e; }
+    .badge-sell { background: #fce8e6; color: #d93025; }
+    .badge-stoploss { background: #fef7e0; color: #e37400; }
+    .badge-pending { background: #e8f0fe; color: #1a73e8; }
+    .badge-matched { background: #e6f4ea; color: #1e8e3e; }
+    .badge-open { background: #e6f4ea; color: #1e8e3e; }
+    .badge-partial { background: #fef7e0; color: #e37400; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-weight: 500; margin-bottom: 4px; font-size: 13px; }
+    .form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.2); }
+    .btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+    .btn-primary { background: #1a73e8; color: white; }
+    .btn-primary:hover { background: #1557b0; }
+    .btn-success { background: #34a853; color: white; }
+    .btn-success:hover { background: #2d8f47; }
+    .btn-danger { background: #ea4335; color: white; }
+    .btn-danger:hover { background: #c5221f; }
+    .btn-warning { background: #fbbc04; color: #333; }
+    .btn-warning:hover { background: #e0a800; }
+    .btn-sm { padding: 5px 10px; font-size: 11px; }
+    .alert { padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
+    .alert-success { background: #e6f4ea; color: #1e8e3e; border: 1px solid #34a853; }
+    .alert-error { background: #fce8e6; color: #d93025; border: 1px solid #ea4335; }
+    .hidden { display: none; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .tp-group { background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+    .tp-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .tp-row label { width: 40px; font-weight: 500; font-size: 12px; }
+    .tp-row input { flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+    .tp-row .pct { width: 50px; }
+    .tp-total { font-size: 12px; font-weight: 600; margin-top: 6px; }
+    .tp-total.valid { color: #34a853; }
+    .tp-total.invalid { color: #ea4335; }
+    .link-btn { color: #1a73e8; text-decoration: none; font-weight: 500; }
+    .link-btn:hover { text-decoration: underline; }
+    .empty-state { text-align: center; padding: 30px 20px; color: #666; }
+    .loading { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; border-top-color: transparent; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>📊 Paper Trading IDX</h1>
+      <div class="timestamp" id="timestamp">Loading...</div>
+    </div>
+    <button class="refresh-btn" onclick="refreshAll()">🔄 Refresh</button>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab active" onclick="showSection('dashboard', this)">🏠 Dashboard</button>
+      <button class="tab" onclick="showSection('trades', this)">📈 Trades</button>
+      <button class="tab" onclick="showSection('pending', this)">📋 Pending</button>
+      <button class="tab" onclick="showSection('opentrade', this)">➕ Open</button>
+      <button class="tab" onclick="showSection('closetrade', this)">➖ Close</button>
+      <button class="tab" onclick="showSection('addpending', this)">📋 Bracket</button>
+      <button class="tab" onclick="showSection('calculator', this)">📐 Calc</button>
+      <button class="tab" onclick="showSection('watchlist', this)">👁️ Watch</button>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div class="section active" id="dashboard">
+      <div class="grid grid-2">
+        <div class="card">
+          <h2>💰 Summary</h2>
+          <div class="grid grid-3">
+            <div class="metric"><div class="value" id="d-modal">-</div><div class="label">Modal</div></div>
+            <div class="metric"><div class="value" id="d-pnl">-</div><div class="label">Total P&L</div></div>
+            <div class="metric"><div class="value" id="d-return">-</div><div class="label">Total Return</div></div>
+          </div>
+          <div class="grid grid-3" style="margin-top:12px;">
+            <div class="metric"><div class="value" id="d-trades">-</div><div class="label">Trades</div></div>
+            <div class="metric"><div class="value" id="d-closed">-</div><div class="label">Closed</div></div>
+            <div class="metric"><div class="value" id="d-pending">-</div><div class="label">Pending</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>📈 Risk Metrics</h2>
+          <div class="grid grid-3">
+            <div class="metric"><div class="value" id="d-winrate">-</div><div class="label">Win Rate</div></div>
+            <div class="metric"><div class="value" id="d-pf">-</div><div class="label">Profit Factor</div></div>
+            <div class="metric"><div class="value" id="d-avgret">-</div><div class="label">Avg Return</div></div>
+          </div>
+          <div class="grid grid-3" style="margin-top:12px;">
+            <div class="metric"><div class="value" id="d-maxdd">-</div><div class="label">Max DD</div></div>
+            <div class="metric"><div class="value" id="d-sharpe">-</div><div class="label">Sharpe</div></div>
+            <div class="metric"><div class="value" id="d-sortino">-</div><div class="label">Sortino</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>📅 Monthly P&L</h2>
+        <div class="table-container">
+          <table><thead><tr><th>Month</th><th>P&L</th><th>Cumulative</th></tr></thead>
+          <tbody id="monthly-body"></tbody></table>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:12px;">
+        <a href="#" id="spreadsheet-link" class="link-btn" target="_blank">📂 Buka di Google Spreadsheet</a>
+      </div>
+    </div>
+
+    <!-- TRADES -->
+    <div class="section" id="trades">
+      <div class="card">
+        <h2>📈 Open Trades</h2>
+        <div class="table-container">
+          <table><thead><tr><th>ID</th><th>Date</th><th>Ticker</th><th>Qty</th><th>Remaining</th><th>Entry</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody id="open-trades-body"></tbody></table>
+        </div>
+        <div id="open-trades-empty" class="empty-state hidden"><p>📭 Tidak ada trade OPEN/PARTIAL</p></div>
+      </div>
+      <div class="card">
+        <h2>📊 Closed Trades</h2>
+        <div class="table-container">
+          <table><thead><tr><th>ID</th><th>Ticker</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&L (Rp)</th><th>P&L (%)</th><th>Date</th></tr></thead>
+          <tbody id="closed-trades-body"></tbody></table>
+        </div>
+        <div id="closed-trades-empty" class="empty-state hidden"><p>📭 Belum ada trade CLOSED</p></div>
+      </div>
+    </div>
+
+    <!-- PENDING ORDERS -->
+    <div class="section" id="pending">
+      <div class="card">
+        <h2>📋 Pending Orders</h2>
+        <div class="table-container">
+          <table><thead><tr><th>ID</th><th>Ticker</th><th>Type</th><th>Qty</th><th>Target</th><th>Current</th><th>Change</th><th>Status</th><th>Parent</th><th>Action</th></tr></thead>
+          <tbody id="pending-body"></tbody></table>
+        </div>
+        <div id="pending-empty" class="empty-state hidden"><p>📭 Tidak ada pending order</p></div>
+      </div>
+    </div>
+
+    <!-- OPEN TRADE -->
+    <div class="section" id="opentrade">
+      <div class="card">
+        <h2>➕ Open Trade (Manual)</h2>
+        <div id="open-trade-msg" class="hidden"></div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Ticker</label><input type="text" id="ot-ticker" placeholder="BBCA"></div>
+          <div class="form-group"><label>Qty (lot)</label><input type="number" id="ot-qty" placeholder="10" min="1"></div>
+          <div class="form-group"><label>Entry Price</label><input type="number" id="ot-price" placeholder="9500" min="0"></div>
+        </div>
+        <button class="btn btn-success" onclick="submitOpenTrade()">✅ Open Trade</button>
+      </div>
+    </div>
+
+    <!-- CLOSE TRADE -->
+    <div class="section" id="closetrade">
+      <div class="card">
+        <h2>➖ Close Trade</h2>
+        <div id="close-trade-msg" class="hidden"></div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Trade ID</label><select id="ct-tradeid"><option value="">-- Pilih --</option></select></div>
+          <div class="form-group"><label>Exit Price</label><input type="number" id="ct-exitprice" placeholder="9800" min="0"></div>
+        </div>
+        <div id="ct-info" class="alert alert-info hidden"></div>
+        <button class="btn btn-danger" onclick="submitCloseTrade()">❌ Close Trade</button>
+      </div>
+    </div>
+
+    <!-- BRACKET ORDER -->
+    <div class="section" id="addpending">
+      <div class="card">
+        <h2>📋 Add Bracket Order</h2>
+        <div id="add-pending-msg" class="hidden"></div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Ticker</label><input type="text" id="ap-ticker" placeholder="BBCA"></div>
+          <div class="form-group"><label>Qty (lot)</label><input type="number" id="ap-qty" placeholder="10" min="1"></div>
+          <div class="form-group"><label>Entry Price (BUY)</label><input type="number" id="ap-entry" placeholder="9500" min="0"></div>
+          <div class="form-group"><label>Stop Loss Price</label><input type="number" id="ap-sl" placeholder="9000" min="0"></div>
+        </div>
+        <div class="tp-group">
+          <b style="font-size:13px;">📈 Take Profit Levels</b>
+          <div class="tp-row">
+            <label>TP1:</label>
+            <input type="number" id="ap-tp1" placeholder="Price: 10000" min="0">
+            <input type="number" id="ap-tp1pct" placeholder="%" min="1" max="100" class="pct">
+            <span>%</span>
+          </div>
+          <div class="tp-row">
+            <label>TP2:</label>
+            <input type="number" id="ap-tp2" placeholder="Price: 10500" min="0">
+            <input type="number" id="ap-tp2pct" placeholder="%" min="1" max="100" class="pct">
+            <span>%</span>
+          </div>
+          <div class="tp-row">
+            <label>TP3:</label>
+            <input type="number" id="ap-tp3" placeholder="Price: 11000" min="0">
+            <input type="text" id="ap-tp3pct" placeholder="%" disabled style="width:50px;background:#f0f0f0;">
+            <span>%</span>
+          </div>
+          <div class="tp-total invalid" id="tp-total">Total: 0% (harus 100%)</div>
+        </div>
+        <button class="btn btn-warning" onclick="submitAddPending()">📋 Add Bracket Order</button>
+      </div>
+    </div>
+
+    <!-- POSITION CALCULATOR -->
+    <div class="section" id="calculator">
+      <div class="card">
+        <h2>📐 Position Size Calculator</h2>
+        <div id="calc-msg" class="hidden"></div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Modal (Rp)</label><input type="number" id="calc-modal" placeholder="100000000" min="0"></div>
+          <div class="form-group"><label>Risk per Trade (%)</label><input type="number" id="calc-risk" placeholder="2" min="0.1" max="100" step="0.1"></div>
+          <div class="form-group"><label>Entry Price</label><input type="number" id="calc-entry" placeholder="9500" min="0"></div>
+          <div class="form-group"><label>Stop Loss Price</label><input type="number" id="calc-sl" placeholder="9000" min="0"></div>
+        </div>
+        <button class="btn btn-primary" onclick="calculatePosition()">📐 Calculate</button>
+        <div id="calc-result" class="alert alert-success hidden" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
+    <!-- WATCHLIST -->
+    <div class="section" id="watchlist">
+      <div class="card">
+        <h2>👁️ Watchlist</h2>
+        <div id="watchlist-msg" class="hidden"></div>
+        <div class="form-group"><label>Ticker (pisahkan koma)</label><input type="text" id="wl-tickers" placeholder="BBCA, BMRI, BBRI"></div>
+        <button class="btn btn-primary" onclick="loadWatchlist()">📊 Check Prices</button>
+        <div id="watchlist-result" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== UTILITY ====================
+    function escapeHtml(str) {
+      if (str == null) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    // ==================== NAVIGATION ====================
+    function showSection(id, tabEl) {
+      document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
+      document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+      document.getElementById(id).classList.add('active');
+      if (tabEl) tabEl.classList.add('active');
+      if (id === 'trades') loadTrades();
+      if (id === 'pending') loadPending();
+      if (id === 'closetrade') loadOpenTradesForClose();
+    }
+
+    // ==================== HELPERS ====================
+    function formatRp(val) {
+      if (val === undefined || val === null || val === '-') return '-';
+      return 'Rp ' + Number(val).toLocaleString('id-ID');
+    }
+    function formatPct(val) {
+      if (val === undefined || val === null || val === '-') return '-';
+      var n = parseFloat(val);
+      return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+    }
+    function pnlClass(val) {
+      var n = parseFloat(val);
+      if (n > 0) return 'positive';
+      if (n < 0) return 'negative';
+      return 'neutral';
+    }
+    function typeBadge(type) {
+      if (type === 'BUY') return '<span class="badge badge-buy">BUY</span>';
+      if (type === 'SELL') return '<span class="badge badge-sell">SELL</span>';
+      if (type === 'STOPLOSS') return '<span class="badge badge-stoploss">SL</span>';
+      return type;
+    }
+    function statusBadge(status) {
+      if (status === 'PENDING') return '<span class="badge badge-pending">PENDING</span>';
+      if (status === 'MATCHED') return '<span class="badge badge-matched">MATCHED</span>';
+      if (status === 'OPEN') return '<span class="badge badge-open">OPEN</span>';
+      if (status === 'PARTIAL') return '<span class="badge badge-partial">PARTIAL</span>';
+      return status;
+    }
+    function showMsg(id, msg, isError) {
+      var el = document.getElementById(id);
+      el.className = 'alert ' + (isError ? 'alert-error' : 'alert-success');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      setTimeout(function() { el.classList.add('hidden'); }, 5000);
+    }
+
+    // ==================== TP CALCULATION ====================
+    function updateTpTotal() {
+      var p1 = parseInt(document.getElementById('ap-tp1pct').value) || 0;
+      var p2 = parseInt(document.getElementById('ap-tp2pct').value) || 0;
+      var p3 = 100 - p1 - p2;
+      document.getElementById('ap-tp3pct').value = p3 > 0 ? p3 : '';
+      var total = document.getElementById('tp-total');
+      total.textContent = 'Total: ' + (p1 + p2 + p3) + '% (harus 100%)';
+      total.className = 'tp-total ' + (p1 + p2 + p3 === 100 ? 'valid' : 'invalid');
+    }
+    document.getElementById('ap-tp1pct').addEventListener('input', updateTpTotal);
+    document.getElementById('ap-tp2pct').addEventListener('input', updateTpTotal);
+
+    // ==================== LOAD DASHBOARD ====================
+    function loadDashboard() {
+      google.script.run.withSuccessHandler(function(data) {
+        document.getElementById('timestamp').textContent = data.timestamp;
+        document.getElementById('d-modal').textContent = formatRp(data.modal);
+        document.getElementById('d-pnl').textContent = formatRp(data.totalPnl);
+        document.getElementById('d-pnl').className = 'value ' + pnlClass(data.totalPnl);
+        document.getElementById('d-return').textContent = formatPct(data.totalReturn);
+        document.getElementById('d-return').className = 'value ' + pnlClass(data.totalReturn);
+        document.getElementById('d-trades').textContent = data.totalTrades;
+        document.getElementById('d-closed').textContent = data.closedTrades;
+        document.getElementById('d-pending').textContent = data.pendingCount;
+        document.getElementById('d-winrate').textContent = data.winRate.toFixed(1) + '%';
+        document.getElementById('d-pf').textContent = isFinite(data.profitFactor) ? data.profitFactor.toFixed(2) : '∞';
+        document.getElementById('d-avgret').textContent = formatPct(data.avgReturn);
+        document.getElementById('d-avgret').className = 'value ' + pnlClass(data.avgReturn);
+        document.getElementById('d-maxdd').textContent = data.maxDD.toFixed(2) + '%';
+        document.getElementById('d-maxdd').className = 'value negative';
+        document.getElementById('d-sharpe').textContent = data.sharpe.toFixed(2);
+        document.getElementById('d-sortino').textContent = data.sortino.toFixed(2);
+        document.getElementById('spreadsheet-link').href = data.spreadsheetUrl;
+        var tbody = document.getElementById('monthly-body');
+        tbody.innerHTML = '';
+        if (data.monthly.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#666;">Belum ada data</td></tr>';
+        } else {
+          data.monthly.forEach(function(m) {
+            tbody.innerHTML += '<tr><td>' + m.month + '</td><td class="' + pnlClass(m.pnl) + '">' + formatRp(m.pnl) + '</td><td class="' + pnlClass(m.cumulative) + '">' + formatRp(m.cumulative) + '</td></tr>';
+          });
+        }
+      }).withFailureHandler(function(err) { console.error(err); }).getDashboardData();
+    }
+
+    // ==================== LOAD TRADES ====================
+    function loadTrades() {
+      google.script.run.withSuccessHandler(function(openTrades) {
+        var tbody = document.getElementById('open-trades-body');
+        tbody.innerHTML = '';
+        if (openTrades.length === 0) {
+          document.getElementById('open-trades-empty').classList.remove('hidden');
+        } else {
+          document.getElementById('open-trades-empty').classList.add('hidden');
+           openTrades.forEach(function(t) {
+            tbody.innerHTML += '<tr><td>' + escapeHtml(t.id) + '</td><td>' + escapeHtml(t.date) + '</td><td><b>' + escapeHtml(t.ticker) + '</b></td><td>' + t.qty + '</td><td>' + t.remaining + '</td><td>' + formatRp(t.entryPrice) + '</td><td>' + statusBadge(t.status) + '</td><td><button class="btn btn-danger btn-sm" onclick="quickClose(\'' + escapeHtml(t.id) + '\',' + t.remaining + ')">Close</button></td></tr>';
+          });
+        }
+      }).getOpenTrades();
+
+      google.script.run.withSuccessHandler(function(closedTrades) {
+        var tbody = document.getElementById('closed-trades-body');
+        tbody.innerHTML = '';
+        if (closedTrades.length === 0) {
+          document.getElementById('closed-trades-empty').classList.remove('hidden');
+        } else {
+          document.getElementById('closed-trades-empty').classList.add('hidden');
+          closedTrades.reverse().forEach(function(t) {
+            tbody.innerHTML += '<tr><td>' + escapeHtml(t.id) + '</td><td><b>' + escapeHtml(t.ticker) + '</b></td><td>' + t.qty + '</td><td>' + formatRp(t.entryPrice) + '</td><td>' + formatRp(t.exitPrice) + '</td><td class="' + pnlClass(t.pnl) + '">' + formatRp(t.pnl) + '</td><td class="' + pnlClass(t.pnlPct) + '">' + formatPct(t.pnlPct) + '</td><td>' + escapeHtml(t.exitDate) + '</td></tr>';
+          });
+        }
+      }).getClosedTrades();
+    }
+
+    // ==================== LOAD PENDING ====================
+    function loadPending() {
+      google.script.run.withSuccessHandler(function(orders) {
+        var tbody = document.getElementById('pending-body');
+        tbody.innerHTML = '';
+        if (orders.length === 0) {
+          document.getElementById('pending-empty').classList.remove('hidden');
+        } else {
+          document.getElementById('pending-empty').classList.add('hidden');
+          orders.forEach(function(o) {
+            var cancelBtn = o.status === 'PENDING' ? '<button class="btn btn-danger btn-sm" onclick="cancelPendingOrder(\'' + escapeHtml(o.id) + '\')">Cancel</button>' : '-';
+            tbody.innerHTML += '<tr><td>' + escapeHtml(o.id) + '</td><td><b>' + escapeHtml(o.ticker) + '</b></td><td>' + typeBadge(o.type) + '</td><td>' + o.qty + '</td><td>' + formatRp(o.targetPrice) + '</td><td>' + formatRp(o.currentPrice) + '</td><td class="' + pnlClass(o.changePct) + '">' + formatPct(o.changePct) + '</td><td>' + statusBadge(o.status) + '</td><td>' + escapeHtml(o.parentId || '-') + '</td><td>' + cancelBtn + '</td></tr>';
+          });
+        }
+      }).getPendingOrders();
+    }
+
+    // ==================== LOAD OPEN TRADES FOR CLOSE ====================
+    function loadOpenTradesForClose() {
+      google.script.run.withSuccessHandler(function(trades) {
+        var select = document.getElementById('ct-tradeid');
+        select.innerHTML = '<option value="">-- Pilih --</option>';
+        trades.forEach(function(t) {
+          select.innerHTML += '<option value="' + escapeHtml(t.id) + '" data-ticker="' + escapeHtml(t.ticker) + '" data-qty="' + t.qty + '" data-remaining="' + t.remaining + '" data-price="' + t.entryPrice + '">' + escapeHtml(t.id) + ' | ' + escapeHtml(t.ticker) + ' ' + t.remaining + '/' + t.qty + ' lots @ ' + t.entryPrice + '</option>';
+        });
+      }).getOpenTrades();
+
+      document.getElementById('ct-tradeid').onchange = function() {
+        var opt = this.options[this.selectedIndex];
+        if (opt.value) {
+          var info = opt.dataset.ticker + ' | Remaining: ' + opt.dataset.remaining + '/' + opt.dataset.qty + ' lots @ Rp ' + Number(opt.dataset.price).toLocaleString();
+          document.getElementById('ct-info').textContent = info;
+          document.getElementById('ct-info').classList.remove('hidden');
+        } else {
+          document.getElementById('ct-info').classList.add('hidden');
+        }
+      };
+    }
+
+    // ==================== FORM SUBMISSIONS ====================
+    function submitOpenTrade() {
+      var t = document.getElementById('ot-ticker').value.toUpperCase().trim();
+      var q = parseInt(document.getElementById('ot-qty').value);
+      var p = parseFloat(document.getElementById('ot-price').value);
+      if (!t || !q || !p) { showMsg('open-trade-msg', 'Semua field harus diisi!', true); return; }
+      google.script.run.withSuccessHandler(function(r) {
+        showMsg('open-trade-msg', r, false);
+        document.getElementById('ot-ticker').value = '';
+        document.getElementById('ot-qty').value = '';
+        document.getElementById('ot-price').value = '';
+      }).openTrade(t, q, p);
+    }
+
+    function submitCloseTrade() {
+      var id = document.getElementById('ct-tradeid').value;
+      var p = parseFloat(document.getElementById('ct-exitprice').value);
+      if (!id || !p) { showMsg('close-trade-msg', 'Pilih Trade ID dan Exit Price!', true); return; }
+      if (!confirm('Tutup trade ' + id + ' @ Rp ' + p.toLocaleString() + '?')) return;
+      google.script.run.withSuccessHandler(function(r) {
+        showMsg('close-trade-msg', r, false);
+        document.getElementById('ct-exitprice').value = '';
+        loadOpenTradesForClose();
+        loadDashboard();
+      }).closeTradeById(id, p);
+    }
+
+    function submitAddPending() {
+      var t = document.getElementById('ap-ticker').value.toUpperCase().trim();
+      var q = parseInt(document.getElementById('ap-qty').value);
+      var e = parseFloat(document.getElementById('ap-entry').value);
+      var t1 = parseFloat(document.getElementById('ap-tp1').value);
+      var t1p = parseInt(document.getElementById('ap-tp1pct').value);
+      var t2 = parseFloat(document.getElementById('ap-tp2').value);
+      var t2p = parseInt(document.getElementById('ap-tp2pct').value);
+      var t3 = parseFloat(document.getElementById('ap-tp3').value);
+      var sl = parseFloat(document.getElementById('ap-sl').value);
+      var tp3pct = 100 - (t1p || 0) - (t2p || 0);
+
+      if (!t || !q || !e || !t1 || !t2 || !t3 || !sl) { showMsg('add-pending-msg', 'Semua field harus diisi!', true); return; }
+      if ((t1p || 0) + (t2p || 0) + tp3pct !== 100) { showMsg('add-pending-msg', 'Total TP % harus 100%!', true); return; }
+
+      google.script.run.withSuccessHandler(function(r) {
+        showMsg('add-pending-msg', r.message, !r.success);
+        if (r.success) {
+          document.getElementById('ap-ticker').value = '';
+          document.getElementById('ap-qty').value = '';
+          document.getElementById('ap-entry').value = '';
+          document.getElementById('ap-tp1').value = '';
+          document.getElementById('ap-tp1pct').value = '';
+          document.getElementById('ap-tp2').value = '';
+          document.getElementById('ap-tp2pct').value = '';
+          document.getElementById('ap-tp3').value = '';
+          document.getElementById('ap-tp3pct').value = '';
+          document.getElementById('ap-sl').value = '';
+          updateTpTotal();
+        }
+      }).webAddPending(t, q, e, t1, t1p, t2, t2p, t3, sl);
+    }
+
+    function cancelPendingOrder(orderId) {
+      if (!confirm('Batalkan order ' + orderId + '?')) return;
+      google.script.run.withSuccessHandler(function(r) { alert(r.message || r); loadPending(); }).webCancelPending(orderId);
+    }
+
+    function quickClose(tradeId, remaining) {
+      var price = prompt('Exit Price untuk ' + tradeId + ' (' + remaining + ' lots):');
+      if (!price) return;
+      var numPrice = parseFloat(price);
+      if (isNaN(numPrice) || numPrice <= 0) { alert('Harga tidak valid!'); return; }
+      if (!confirm('Tutup ' + tradeId + ' (' + remaining + ' lots) @ Rp ' + numPrice.toLocaleString() + '?')) return;
+      google.script.run.withSuccessHandler(function(r) { alert(r); loadTrades(); loadDashboard(); }).closeTradeById(tradeId, numPrice);
+    }
+
+    function refreshAll() {
+      document.querySelector('.refresh-btn').innerHTML = '<span class="loading"></span>';
+      google.script.run.withSuccessHandler(function() { loadDashboard(); document.querySelector('.refresh-btn').innerHTML = '🔄 Refresh'; }).webRefreshPrices();
+    }
+
+    // ==================== POSITION CALCULATOR ====================
+    function calculatePosition() {
+      var modal = parseFloat(document.getElementById('calc-modal').value) || 100000000;
+      var riskPct = parseFloat(document.getElementById('calc-risk').value) || 2;
+      var entry = parseFloat(document.getElementById('calc-entry').value);
+      var sl = parseFloat(document.getElementById('calc-sl').value);
+
+      if (!entry || !sl) { showMsg('calc-msg', 'Entry dan SL harus diisi!', true); return; }
+      if (entry <= sl) { showMsg('calc-msg', 'Entry harus lebih tinggi dari SL!', true); return; }
+
+      var riskAmount = modal * (riskPct / 100);
+      var riskPerShare = entry - sl;
+      var lots = Math.floor(riskAmount / (riskPerShare * 100));
+      var totalCost = lots * entry * 100;
+
+      var result = document.getElementById('calc-result');
+      result.innerHTML = '<b>📊 Hasil:</b><br>' +
+        '💰 Risk Amount: Rp ' + riskAmount.toLocaleString() + '<br>' +
+        '📉 Risk/Share: Rp ' + riskPerShare.toLocaleString() + '<br>' +
+        '✅ Recommended: <b>' + lots + ' lots</b> (Rp ' + totalCost.toLocaleString() + ')<br>' +
+        '📊 Risk/Reward 1:1 = Rp ' + (entry + riskPerShare).toLocaleString();
+      result.classList.remove('hidden');
+    }
+
+    // ==================== WATCHLIST ====================
+    function loadWatchlist() {
+      var tickers = document.getElementById('wl-tickers').value.toUpperCase().trim();
+      if (!tickers) { showMsg('watchlist-msg', 'Masukkan ticker!', true); return; }
+
+      var tickerArray = tickers.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t; });
+      if (tickerArray.length === 0) { showMsg('watchlist-msg', 'Ticker tidak valid!', true); return; }
+
+      var resultDiv = document.getElementById('watchlist-result');
+      resultDiv.innerHTML = '<span class="loading"></span> Loading...';
+
+      google.script.run.withSuccessHandler(function(prices) {
+        var html = '<table><thead><tr><th>Ticker</th><th>Price</th><th>Change</th></tr></thead><tbody>';
+        tickerArray.forEach(function(t) {
+          var p = prices[t];
+          if (p && p.price) {
+            html += '<tr><td><b>' + t + '</b></td><td>' + formatRp(p.price) + '</td><td class="' + pnlClass(p.changePct) + '">' + formatPct(p.changePct) + '</td></tr>';
+          } else {
+            html += '<tr><td><b>' + t + '</b></td><td colspan="2" style="color:#ea4335;">Error</td></tr>';
+          }
+        });
+        html += '</tbody></table>';
+        resultDiv.innerHTML = html;
+      }).withFailureHandler(function(err) {
+        resultDiv.innerHTML = '<div class="alert alert-error">Error: ' + err + '</div>';
+      }).webGetWatchlistPrices(tickerArray);
+    }
+
+    // ==================== AUTO REFRESH ====================
+    setInterval(function() { loadDashboard(); }, 60000);
+
+    // ==================== INIT ====================
+    loadDashboard();
+  </script>
+</body>
+</html>
