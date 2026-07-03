@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.linalg as npla
 import pandas as pd
 import warnings
 import logging
@@ -7,6 +8,7 @@ from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 from config import SL_MULTIPLIER, RR1, RR2, RR3, MC_N_SIM, MC_HORIZON
 
 logger = logging.getLogger("markov")
+logger.setLevel(logging.ERROR)
 
 # Global counter for Markov failures
 _markov_failures = 0
@@ -98,10 +100,15 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
             p00 = next(res.params[k] for k in p_keys if '0->0' in k or '0,0' in k)
             p10 = next(res.params[k] for k in p_keys if '1->0' in k or '1,0' in k)
             transition_matrix = np.array([[p00, 1 - p00], [p10, 1 - p10]])
+        except (npla.LinAlgError, ValueError, RuntimeError) as e:
+            use_markov = False
+            _markov_failures += 1
+            if _markov_failures <= 1:
+                logger.warning(f"Markov fit failed ({type(e).__name__}): {e}")
         except Exception as e:
             use_markov = False
             _markov_failures += 1
-            if _markov_failures <= 3:
+            if _markov_failures <= 1:
                 logger.warning(f"Markov fit failed: {e}")
 
         if markov_cache is not None and markov_cache_key is not None:
@@ -140,26 +147,32 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
         rand_returns = np.random.normal(mu_val, sigma_val, (n_sim, horizon))
         cum_returns = np.cumsum(rand_returns, axis=1)
 
-    prices = entry_price * np.exp(cum_returns)
+    prices = entry_price * np.exp(np.clip(cum_returns, -5, 5))
 
     sl_hit_at = np.full(n_sim, horizon + 1, dtype=np.int32)
     tp1_hit_at = np.full(n_sim, horizon + 1, dtype=np.int32)
     tp2_hit_at = np.full(n_sim, horizon + 1, dtype=np.int32)
     tp3_hit_at = np.full(n_sim, horizon + 1, dtype=np.int32)
 
+    # Ensure SL and TP are valid positive numbers
+    has_sl = stop_loss is not None and stop_loss > 0
+    has_tp1 = tp1 is not None and tp1 > 0
+    has_tp2 = tp2 is not None and tp2 > 0
+    has_tp3 = tp3 is not None and tp3 > 0
+
     for t in range(horizon):
         p = prices[:, t]
         not_sl = sl_hit_at > t
-        if stop_loss:
+        if has_sl:
             sl_hit = not_sl & (p <= stop_loss)
             sl_hit_at[sl_hit] = t + 1
-        if tp1:
+        if has_tp1:
             tp1_hit = not_sl & (tp1_hit_at > t) & (p >= tp1)
             tp1_hit_at[tp1_hit] = t + 1
-        if tp2:
+        if has_tp2:
             tp2_hit = not_sl & (tp2_hit_at > t) & (p >= tp2)
             tp2_hit_at[tp2_hit] = t + 1
-        if tp3:
+        if has_tp3:
             tp3_hit = not_sl & (tp3_hit_at > t) & (p >= tp3)
             tp3_hit_at[tp3_hit] = t + 1
 
@@ -173,10 +186,10 @@ def simulate_tp_sl_probability(df, entry_price, stop_loss, tp1, tp2, tp3,
     valid_tp3 = tp3_hit_at[tp3_hit_at <= horizon]
 
     return {
-        "P_TP1": f"{(hit_tp1 / n_sim * 100):.2f}%" if tp1 else None,
-        "P_TP2": f"{(hit_tp2 / n_sim * 100):.2f}%" if tp2 else None,
-        "P_TP3": f"{(hit_tp3 / n_sim * 100):.2f}%" if tp3 else None,
-        "P_SL": f"{(hit_sl / n_sim * 100):.2f}%" if stop_loss else None,
+        "P_TP1": f"{(hit_tp1 / n_sim * 100):.2f}%" if has_tp1 else None,
+        "P_TP2": f"{(hit_tp2 / n_sim * 100):.2f}%" if has_tp2 else None,
+        "P_TP3": f"{(hit_tp3 / n_sim * 100):.2f}%" if has_tp3 else None,
+        "P_SL": f"{(hit_sl / n_sim * 100):.2f}%" if has_sl else None,
         "AVG_DAYS_TP1": float(np.mean(valid_tp1)) if len(valid_tp1) > 0 else None,
         "AVG_DAYS_TP2": float(np.mean(valid_tp2)) if len(valid_tp2) > 0 else None,
         "AVG_DAYS_TP3": float(np.mean(valid_tp3)) if len(valid_tp3) > 0 else None,
