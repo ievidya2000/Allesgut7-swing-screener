@@ -10,6 +10,14 @@ SPREADSHEET_ID = "1w8vhm-3sfY8fk_TEPoAvr6ujjZnZAPMXV-QxX5baBPE"
 # Path ke service account JSON key file
 SERVICE_ACCOUNT_FILE = str(Path(__file__).parent / "service_account.json")
 
+# Override from Streamlit secrets (cloud deployment)
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets'):
+        SPREADSHEET_ID = st.secrets.get("SPREADSHEET_ID", SPREADSHEET_ID)
+except Exception:
+    pass
+
 # Sheet names (harus cocok dengan Code.gs)
 SHEET_TRADE_LOG = "Trade Log"
 SHEET_PENDING = "Pending Orders"

@@ -92,9 +92,20 @@ class GSheetsClient:
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ]
-        creds = Credentials.from_service_account_file(
-            self.service_account_file, scopes=scopes
-        )
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets') and 'google_service_account' in st.secrets:
+                creds = Credentials.from_service_account_info(
+                    dict(st.secrets["google_service_account"]), scopes=scopes
+                )
+            else:
+                creds = Credentials.from_service_account_file(
+                    self.service_account_file, scopes=scopes
+                )
+        except Exception:
+            creds = Credentials.from_service_account_file(
+                self.service_account_file, scopes=scopes
+            )
         self.gc = gspread.authorize(creds)
         self.spreadsheet = self.gc.open_by_key(self.spreadsheet_id)
         return self
