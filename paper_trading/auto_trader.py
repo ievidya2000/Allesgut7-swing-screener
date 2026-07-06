@@ -4,7 +4,7 @@ import math
 from datetime import datetime
 
 from paper_trading.config import (
-    INITIAL_CAPITAL, RISK_PER_TRADE_PCT, MAX_POSITIONS,
+    INITIAL_CAPITAL, RISK_PER_TRADE_PCT, MAX_POSITIONS, MAX_LOTS_PER_TICKER,
     TP1_PCT, TP2_PCT, TP3_PCT,
     MIN_SCORE, SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES,
     ALLOWED_TIMING, MAX_AUTO_ORDERS_PER_DAY,
@@ -115,51 +115,51 @@ def filter_screener_results(results, open_tickers=None, pending_tickers=None,
         # 0. Check excluded setups
         if setup in EXCLUDED_SETUPS:
             reason = f"setup '{setup}' excluded from auto-trade"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": True})
             continue
 
         # 0b. Check per-setup market regime filter
         allowed_regimes = SETUP_ALLOWED_REGIMES.get(setup)
         if allowed_regimes and stock_regime not in allowed_regimes:
             reason = f"setup '{setup}' not allowed in {stock_regime} market"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": False})
             continue
 
         # 1. Check timing allowed
         if timing not in ALLOWED_TIMING:
             reason = f"timing '{timing}' not allowed"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": False})
             continue
 
         # 2. Check minimum score (per-setup override or global)
         setup_min_score = SETUP_MIN_SCORE.get(setup, MIN_SCORE)
         if score < setup_min_score:
             reason = f"score {score:.2f} < min {setup_min_score} for {setup}"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": False})
             continue
 
         # 3. Check if already open
         if SKIP_IF_ALREADY_OPEN and ticker_clean in open_tickers:
             reason = "already has OPEN trade"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": True})
             continue
 
         # 4. Check if already pending
         if SKIP_IF_ALREADY_PENDING and ticker_clean in pending_tickers:
             reason = "already has pending order"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": True})
             continue
 
         # 5. Check max orders per day
         if today_orders >= MAX_AUTO_ORDERS_PER_DAY:
             reason = f"max {MAX_AUTO_ORDERS_PER_DAY} orders/day reached"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": False})
             continue
 
         # 6. Check position limit
         if open_positions + len(to_execute) >= max_positions:
             reason = f"max positions {max_positions} reached"
-            skipped.append({"ticker": ticker, "reason": reason, "timing": timing})
+            skipped.append({"Ticker": ticker, "Setup": setup, "Score": score, "Stock Regime": stock_regime, "reason": reason, "Timing": timing, "Force_disabled": False})
             continue
 
         # Klasifikasi berdasarkan timing
@@ -182,7 +182,7 @@ def filter_screener_results(results, open_tickers=None, pending_tickers=None,
     return to_execute, to_watch, skipped
 
 
-def auto_create_orders(results, client=None, dry_run=False):
+def auto_create_orders(results, client=None, dry_run=False, force=False):
     """
     Auto-create bracket orders dari screener results ke Google Sheets.
 
@@ -213,14 +213,19 @@ def auto_create_orders(results, client=None, dry_run=False):
     today_orders = client.count_today_orders_all()
 
     # Filter results
-    to_execute, to_watch, skipped = filter_screener_results(
-        results,
-        open_tickers=open_tickers,
-        pending_tickers=pending_tickers,
-        today_orders=today_orders,
-        open_positions=open_positions,
-        max_positions=MAX_POSITIONS,
-    )
+    if force:
+        to_execute = list(results)
+        to_watch = []
+        skipped = []
+    else:
+        to_execute, to_watch, skipped = filter_screener_results(
+            results,
+            open_tickers=open_tickers,
+            pending_tickers=pending_tickers,
+            today_orders=today_orders,
+            open_positions=open_positions,
+            max_positions=MAX_POSITIONS,
+        )
 
     # Summary
     summary = {
@@ -286,6 +291,7 @@ def auto_create_orders(results, client=None, dry_run=False):
 
         # Hitung position size
         qty = calculate_position_size(target_entry, sl, modal, RISK_PER_TRADE_PCT)
+        qty = min(qty, MAX_LOTS_PER_TICKER)
 
         if qty <= 0:
             skipped.append({"ticker": ticker, "reason": "position size = 0", "timing": timing})

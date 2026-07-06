@@ -211,6 +211,19 @@ class GSheetsClient:
         short_id = uuid.uuid4().hex[:4].upper()
         return f"P{now.strftime('%m%d%H%M')}_{short_id}"
 
+    def _apply_bracket_colors(self, start_row):
+        """Apply row colors matching Code.gs convention.
+        BUY = green (#E6F4EA), SELL = red (#FCE8E6), STOPLOSS = yellow (#FDD663)
+        """
+        GREEN = {'backgroundColor': {'red': 0.90, 'green': 0.96, 'blue': 0.92}}
+        RED = {'backgroundColor': {'red': 0.99, 'green': 0.91, 'blue': 0.90}}
+        YELLOW = {'backgroundColor': {'red': 0.99, 'green': 0.84, 'blue': 0.39}}
+
+        self.pending.format(f'A{start_row}:L{start_row}', GREEN)
+        for i in range(1, 4):
+            self.pending.format(f'A{start_row + i}:L{start_row + i}', RED)
+        self.pending.format(f'A{start_row + 4}:L{start_row + 4}', YELLOW)
+
     def create_bracket_order(self, ticker, qty, entry_price, tp1_price, tp2_price,
                               tp3_price, sl_price, tp1_pct=60, tp2_pct=25, tp3_pct=15,
                               notes=""):
@@ -294,6 +307,10 @@ class GSheetsClient:
 
         # Append semua rows ke Pending Orders sheet (batch call)
         self.pending.append_rows(rows, value_input_option="USER_ENTERED")
+
+        # Apply row colors (matching Code.gs convention)
+        last_row = len(self.pending.get_all_values())
+        self._apply_bracket_colors(last_row - 4)
 
         return {
             "order_id": parent_id,

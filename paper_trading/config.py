@@ -19,6 +19,8 @@ SHEET_SETTINGS = "Settings"
 INITIAL_CAPITAL = 100_000_000      # Rp 100 juta
 RISK_PER_TRADE_PCT = 2.0           # 2% risk per trade
 MAX_POSITIONS = 12                  # Max concurrent positions
+MAX_LOTS_PER_TICKER = 100           # Max 100 lots per ticker
+GAP_TOLERANCE_PCT = 2.0             # Max gap % untuk eksekusi (sync with Code.gs)
 
 # Partial Exit (% qty dijual di setiap TP)
 TP1_PCT = 60
@@ -59,7 +61,8 @@ ALLOWED_TIMING = [
 ]
 
 # Max order baru per hari (mencegah over-trading)
-MAX_AUTO_ORDERS_PER_DAY = 5
+MAX_AUTO_ORDERS_PER_DAY = 7
+MAX_FORCE_ORDERS = 13              # Extra orders via force execute (total max = 20)
 
 # Skip ticker yang sudah ada trade OPEN/PARTIAL
 SKIP_IF_ALREADY_OPEN = True

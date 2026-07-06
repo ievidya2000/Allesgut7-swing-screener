@@ -18,13 +18,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import TICKERS, INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, SETUP_ORDER, SIGNAL_MAP, COLOR_MAP, MAX_DISPLAY, MC_HORIZON
-from paper_trading.config import MIN_SCORE, SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES, MAX_AUTO_ORDERS_PER_DAY
-from paper_trading.auto_trader import filter_screener_results, auto_create_orders, calculate_position_size
 try:
+    from paper_trading.config import MIN_SCORE, SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES, MAX_AUTO_ORDERS_PER_DAY, MAX_LOTS_PER_TICKER, MAX_FORCE_ORDERS
+    from paper_trading.auto_trader import filter_screener_results, auto_create_orders, calculate_position_size
     from paper_trading.gsheets_client import GSheetsClient
     HAS_GSPREAD = True
 except ImportError:
     HAS_GSPREAD = False
+    filter_screener_results = None
+    auto_create_orders = None
+    calculate_position_size = None
+    GSheetsClient = None
 from data import get_all_market_data, get_jkse_data, get_fundamental_data
 from indicators import calculate_full_indicators
 from signals import determine_market_regime, determine_stock_regime, classify_setup_state
@@ -2633,7 +2637,7 @@ def render_auto_trade():
     """Render auto-trade tab with live Google Sheets status, preview, and execution."""
     st.subheader("🤖 Auto Trade")
 
-    if not HAS_GSPREAD:
+    if not HAS_GSPREAD or filter_screener_results is None:
         st.error("❌ Module `gspread` atau `google-auth` tidak terinstall. Install: `pip install gspread google-auth`")
         return
 
@@ -2694,6 +2698,11 @@ def render_auto_trade():
         if hasattr(st.session_state, "_filter_regimes") and st.session_state._filter_regimes:
             if "Stock Regime" in filtered.columns:
                 filtered = filtered[filtered["Stock Regime"].isin(st.session_state._filter_regimes)]
+        # 2b. Per-setup regime filter (SETUP_ALLOWED_REGIMES) - same as Results tab
+        if "Stock Regime" in filtered.columns:
+            for setup_name, allowed_regimes in SETUP_ALLOWED_REGIMES.items():
+                mask = (filtered["Setup"] != setup_name) | (filtered["Stock Regime"].isin(allowed_regimes))
+                filtered = filtered[mask]
         setup_scores = st.session_state.get("_filter_setup_scores", {})
         if setup_scores:
             mask = pd.Series(True, index=filtered.index)
@@ -2762,7 +2771,7 @@ def render_auto_trade():
 
     def _apply_row_color(df, bg_color):
         """Apply uniform row background color (matches Code.gs style)."""
-        return df.style.map(lambda _: f"background-color: {bg_color}", axis=1)
+        return df.style.apply(lambda row: [f"background-color: {bg_color}; color: #1a1a2e"] * len(row), axis=1)
 
     def _color_setup_cell(val):
         """Color Setup column by setup type (matches Dashboard style)."""
@@ -2789,10 +2798,37 @@ def render_auto_trade():
                      use_container_width=True, hide_index=True)
 
     if skipped:
-        with st.expander(f"**⏭️ Skip ({len(skipped)})**"):
+        with st.expander(f"**⏭️ Skip ({len(skipped)})** — Pilih untuk force execute"):
             skip_df = pd.DataFrame(skipped)
-            styled_skip = _apply_row_color(skip_df, "#FCE8E6")
-            st.dataframe(styled_skip, use_container_width=True, hide_index=True)
+            skip_df["Force"] = False
+            editor_cols = ["Force", "Ticker", "Setup", "Score", "reason"]
+            editor_avail = [c for c in editor_cols if c in skip_df.columns]
+            disabled_indices = skip_df[skip_df.get("Force_disabled", False) == True].index.tolist()
+
+            edited = st.data_editor(
+                skip_df[editor_avail],
+                column_config={
+                    "Force": st.column_config.CheckboxColumn("⚡ Force", default=False),
+                    "Score": st.column_config.NumberColumn("Score", format="%.1f"),
+                    "reason": st.column_config.TextColumn("Reason", width="large"),
+                },
+                disabled=disabled_indices,
+                hide_index=True,
+                use_container_width=True,
+                key="skip_editor"
+            )
+
+            forced_tickers = edited[edited["Force"] == True]["Ticker"].tolist()
+
+            if forced_tickers:
+                remaining = MAX_FORCE_ORDERS - len(forced_tickers)
+                if remaining < 0:
+                    st.error(f"⚠️ Melebihi batas force orders! Maks {MAX_FORCE_ORDERS}. Terpilih: {len(forced_tickers)}")
+                else:
+                    st.warning(f"⚠️ {len(forced_tickers)} orders di-force (sisa quota: {remaining})")
+                st.session_state._forced_tickers = forced_tickers
+            else:
+                st.session_state._forced_tickers = []
 
     if not to_execute and not to_watch:
         st.info("Tidak ada order yang bisa dieksekusi.")
@@ -2806,14 +2842,34 @@ def render_auto_trade():
     dry_run = st.checkbox("🧪 Dry Run (simulate only, tidak buat order)", value=True, key="at_dry_run")
 
     if st.button("🚀 Execute Auto Trade", type="primary", key="at_execute"):
-        if not to_execute:
+        forced = st.session_state.get("_forced_tickers", [])
+        all_execute = list(to_execute)
+
+        # Add forced orders from skipped
+        if forced:
+            for s in skipped:
+                if s.get("Ticker") in forced:
+                    for r in results_list:
+                        if r.get("Ticker") == s.get("Ticker"):
+                            all_execute.append(r)
+                            break
+
+        total = len(all_execute)
+        normal_count = len(to_execute)
+        force_count = total - normal_count
+
+        if not all_execute:
             st.warning("Tidak ada order untuk dieksekusi.")
         else:
+            if force_count > 0:
+                st.info(f"📋 Executing {normal_count} normal + {force_count} forced = {total} orders")
+
             with st.spinner("Mengeksekusi order..."):
                 summary = auto_create_orders(
-                    results_list,
+                    all_execute,
                     client=client,
                     dry_run=dry_run,
+                    force=force_count > 0,
                 )
 
             if summary:

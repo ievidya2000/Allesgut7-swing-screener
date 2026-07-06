@@ -39,6 +39,9 @@ var CONFIG = {
   },
   TRIGGER: {
     INTERVAL_MINUTES: 1
+  },
+  GAP: {
+    TOLERANCE_PCT: 2.0
   }
 };
 
@@ -586,6 +589,55 @@ function getParentStatus(pData, parentId) {
     }
   }
   return null;
+}
+
+// ==================== GAP DETECTION ====================
+function checkGapAndCancel() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var pending = ss.getSheetByName(CONFIG.SHEETS.PENDING);
+  var data = pending.getDataRange().getValues();
+  var cancelled = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var status = row[PCOL.STATUS];
+    var type = row[PCOL.TYPE];
+    var ticker = row[PCOL.TICKER];
+    var target = parseFloat(row[PCOL.TARGET]);
+    var current = parseFloat(row[PCOL.CURRENT]);
+
+    // Only check PENDING BUY orders
+    if (status !== 'PENDING' || type !== 'BUY' || !target || !current || isNaN(target) || isNaN(current)) continue;
+
+    // Calculate gap: (current - target) / target * 100
+    var gapPct = ((current - target) / target) * 100;
+
+    // If gap > tolerance, cancel entire bracket order
+    if (gapPct > CONFIG.GAP.TOLERANCE_PCT) {
+      var orderId = row[PCOL.ID];
+      cancelPendingByParent(orderId);
+      cancelled.push({
+        ticker: ticker,
+        target: target,
+        current: current,
+        gap: gapPct.toFixed(1)
+      });
+      Logger.log('GAP CANCEL: ' + ticker + ' target=' + target + ' current=' + current + ' gap=' + gapPct.toFixed(1) + '%');
+    }
+  }
+
+  // Send Telegram alert if any orders cancelled
+  if (cancelled.length > 0) {
+    var msg = '⚠️ GAP UP DETECTED — Orders Cancelled:\n';
+    for (var j = 0; j < cancelled.length; j++) {
+      var c = cancelled[j];
+      msg += '• ' + c.ticker + ': target Rp ' + c.target + ' → current Rp ' + c.current + ' (gap ' + c.gap + '%)\n';
+    }
+    msg += '\nTunggu pullback atau near entry zone.';
+    sendTelegram(msg);
+  }
+
+  return cancelled;
 }
 
 // ==================== PRICE MONITORING ====================
@@ -1410,6 +1462,7 @@ function autoCheck() {
 
     if (isMarketSession) {
       refreshPrices();
+      checkGapAndCancel();
       checkPendingOrders();
       checkProximityAlert();
       checkDrawdownAlert();
