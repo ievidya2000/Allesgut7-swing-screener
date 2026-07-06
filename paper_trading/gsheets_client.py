@@ -188,14 +188,16 @@ class GSheetsClient:
         return count
 
     def count_today_orders_all(self):
-        """Hitung semua order yang dibuat hari ini (termasuk MATCHED, CANCELLED)."""
+        """Hitung bracket order yang dibuat hari ini (hanya BUY yang belum CANCELLED)."""
         today = datetime.now().strftime("%Y-%m-%d")
         data = self.pending.get_all_values()
         count = 0
-        for row in data[1:]:  # skip header
-            if len(row) > PCOL_DATE:
+        for row in data[1:]:
+            if len(row) > PCOL_DATE and len(row) > PCOL_TYPE and len(row) > PCOL_STATUS:
                 date_str = row[PCOL_DATE]
-                if date_str.startswith(today):
+                order_type = row[PCOL_TYPE]
+                status = row[PCOL_STATUS]
+                if date_str.startswith(today) and order_type == 'BUY' and status != 'CANCELLED':
                     count += 1
         return count
 
