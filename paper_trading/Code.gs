@@ -888,6 +888,7 @@ function checkProximityAlert() {
   var pending = ss.getSheetByName(CONFIG.SHEETS.PENDING);
   var data = pending.getDataRange().getValues();
   var alerts = [];
+  var props = PropertiesService.getScriptProperties();
 
   for (var i = 1; i < data.length; i++) {
     if (data[i][PCOL.STATUS] === 'PENDING') {
@@ -895,13 +896,24 @@ function checkProximityAlert() {
       var type = data[i][PCOL.TYPE];
       var target = parseFloat(data[i][PCOL.TARGET]);
       var current = parseFloat(data[i][PCOL.CURRENT]);
+      var orderId = data[i][PCOL.ID];
 
       if (!current || !target) continue;
 
       var proximity = Math.abs(current - target) / target * 100;
+      var alertKey = 'prox_' + orderId;
+
       if (proximity <= 2) {
-        alerts.push('📊 ' + ticker + ' ' + type + ' @ ' + current.toLocaleString() +
-          ' (Target: ' + target.toLocaleString() + ', Gap: ' + proximity.toFixed(2) + '%)');
+        var lastAlert = props.getProperty(alertKey);
+        var proximityBucket = Math.floor(proximity);
+
+        if (lastAlert !== String(proximityBucket)) {
+          alerts.push('📊 ' + ticker + ' ' + type + ' @ ' + current.toLocaleString() +
+            ' (Target: ' + target.toLocaleString() + ', Gap: ' + proximity.toFixed(2) + '%)');
+          props.setProperty(alertKey, String(proximityBucket));
+        }
+      } else {
+        props.deleteProperty(alertKey);
       }
     }
   }
@@ -1462,7 +1474,10 @@ function autoCheck() {
 
     if (isMarketSession) {
       refreshPrices();
-      checkGapAndCancel();
+      // Gap check hanya di 15 menit pertama (09:00-09:15 WIB)
+      if (t >= 540 && t <= 555) {
+        checkGapAndCancel();
+      }
       checkPendingOrders();
       checkProximityAlert();
       checkDrawdownAlert();
