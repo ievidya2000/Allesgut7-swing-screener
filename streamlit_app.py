@@ -167,7 +167,7 @@ for key in ["screening_df", "market_data", "market_regime", "screening_done",
 # CACHED FUNCTIONS
 # ═══════════════════════════════════════════
 
-@st.cache_data(ttl=3600 * 8, show_spinner="Loading market data...")
+@st.cache_data(ttl=3600 * 2, show_spinner="Loading market data...")
 def cached_load_data(start_date=None, end_date=None):
     return get_all_market_data(TICKERS, start=start_date, end=end_date)
 
