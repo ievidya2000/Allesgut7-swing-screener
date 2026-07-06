@@ -22,7 +22,7 @@ DEFAULT_CONFIG = {
     "rr1": 1.5,
     "rr2": 2.5,
     "rr3": 3.0,
-    "sl_multiplier": 1.2,
+    "sl_multiplier": 1.5,
     "donchian_period": 20,
     "volume_ma_period": 20,
     "ichimoku_tenkan": 9,

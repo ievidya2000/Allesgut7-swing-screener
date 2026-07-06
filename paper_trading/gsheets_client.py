@@ -389,16 +389,20 @@ class GSheetsClient:
             cancelled = self.cancel_pending_by_parent(parent_id)
             all_cancelled.extend(cancelled)
 
-        # Return info lengkap
+        # Return info lengkap (deduplicated by parent_id)
         result = []
+        seen_ids = set()
         for order in expired:
-            result.append({
-                "id": order["id"],
-                "ticker": order["ticker"],
-                "date": order["date"],
-                "type": order["type"],
-                "target_price": order["target_price"],
-                "parent_id": order.get("parent_id", ""),
-            })
+            oid = order["id"]
+            if oid not in seen_ids:
+                seen_ids.add(oid)
+                result.append({
+                    "id": order["id"],
+                    "ticker": order["ticker"],
+                    "date": order["date"],
+                    "type": order["type"],
+                    "target_price": order["target_price"],
+                    "parent_id": order.get("parent_id", ""),
+                })
 
         return result

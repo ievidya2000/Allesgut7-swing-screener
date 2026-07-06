@@ -18,9 +18,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import TICKERS, INITIAL_CAPITAL, POSITION_SIZE, MAX_POSITIONS, SETUP_ORDER, SIGNAL_MAP, COLOR_MAP, MAX_DISPLAY, MC_HORIZON
-from paper_trading.config import SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES, MAX_AUTO_ORDERS_PER_DAY
+from paper_trading.config import MIN_SCORE, SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES, MAX_AUTO_ORDERS_PER_DAY
 from paper_trading.auto_trader import filter_screener_results, auto_create_orders, calculate_position_size
-from paper_trading.gsheets_client import GSheetsClient
+try:
+    from paper_trading.gsheets_client import GSheetsClient
+    HAS_GSPREAD = True
+except ImportError:
+    HAS_GSPREAD = False
 from data import get_all_market_data, get_jkse_data, get_fundamental_data
 from indicators import calculate_full_indicators
 from signals import determine_market_regime, determine_stock_regime, classify_setup_state
@@ -149,9 +153,10 @@ TIMING_MAP = {
 }
 
 # ── Session state defaults ──
-for key in ["screening_df", "market_data", "market_regime", "screening_done"]:
+for key in ["screening_df", "market_data", "market_regime", "screening_done",
+            "_filter_setups", "_filter_regimes", "_filter_setup_scores", "_auto_trade_summary"]:
     if key not in st.session_state:
-        st.session_state[key] = None if key != "screening_done" else False
+        st.session_state[key] = None if key not in ("screening_done",) else False
 
 
 # ═══════════════════════════════════════════
@@ -272,7 +277,7 @@ def cached_run_screener(market_data_hash, market_regime):
             def _pf(val):
                 if val is None: return 0.0
                 try: return float(str(val).strip().rstrip('%'))
-                except: return 0.0
+                except (ValueError, TypeError): return 0.0
             p_sl_val = _pf(prob.get("P_SL"))
             p_tp3_val = _pf(prob.get("P_TP3"))
             if p_sl_val > 60 or (p_tp3_val == 0 and p_sl_val > 55):
@@ -425,8 +430,10 @@ def cached_run_screener(market_data_hash, market_regime):
                 "BearFiltered": is_bear_filtered,
                 "rl_features": rl_features,
             })
-        except Exception:
+        except Exception as e:
             skipped["error"] += 1
+            import traceback
+            print(f"Error screening {ticker}: {e}\n{traceback.format_exc()}")
 
     df_out = pd.DataFrame(results)
     if not df_out.empty:
@@ -665,7 +672,7 @@ def render_sidebar():
                     st.caption("Override global Min Score per setup")
                     setup_scores = {}
                     for s in SETUP_ORDER:
-                        default_val = int(SETUP_MIN_SCORE.get(s, 0))
+                        default_val = int(SETUP_MIN_SCORE.get(s, MIN_SCORE))
                         setup_scores[s] = st.slider(
                             s, 0, 100, default_val, key=f"filt_score_{s}"
                         )
@@ -827,6 +834,12 @@ def render_results():
     if hasattr(st.session_state, "_filter_regimes") and st.session_state._filter_regimes:
         if "Stock Regime" in filtered.columns:
             filtered = filtered[filtered["Stock Regime"].isin(st.session_state._filter_regimes)]
+
+    # 2b. Per-setup regime filter (SETUP_ALLOWED_REGIMES)
+    if "Stock Regime" in filtered.columns:
+        for setup_name, allowed_regimes in SETUP_ALLOWED_REGIMES.items():
+            mask = (filtered["Setup"] != setup_name) | (filtered["Stock Regime"].isin(allowed_regimes))
+            filtered = filtered[mask]
 
     # 3. Per-setup min score filter (overrides global min score)
     setup_scores = st.session_state.get("_filter_setup_scores", {})
@@ -1673,9 +1686,9 @@ def _run_backtest(start_date, end_date, capital, pos_size, max_pos, freq, ticker
             entry_p = pos["entry_price"]
 
             ap = load_adaptive_config()
-            tp1_pct = ap.get("tp1_pct", 33) / 100.0
-            tp2_pct = ap.get("tp2_pct", 33) / 100.0
-            tp3_pct = ap.get("tp3_pct", 34) / 100.0
+            tp1_pct = ap.get("tp1_pct", 60) / 100.0
+            tp2_pct = ap.get("tp2_pct", 25) / 100.0
+            tp3_pct = ap.get("tp3_pct", 15) / 100.0
 
             if pos["sl"] and low <= pos["sl"]:
                 shares = remaining
@@ -1838,6 +1851,8 @@ def _run_backtest(start_date, end_date, capital, pos_size, max_pos, freq, ticker
             pred_id = log_prediction(r)
 
             entry_price = r["price_at_signal"]
+            # NOTE: Backtest uses fixed position sizing (Rp pos_size per trade)
+            # Auto-trader uses risk-based sizing (2% of capital, position varies by SL distance)
             shares = int(pos_size / entry_price)
             if shares <= 0:
                 continue
@@ -2618,18 +2633,30 @@ def render_auto_trade():
     """Render auto-trade tab with live Google Sheets status, preview, and execution."""
     st.subheader("🤖 Auto Trade")
 
+    if not HAS_GSPREAD:
+        st.error("❌ Module `gspread` atau `google-auth` tidak terinstall. Install: `pip install gspread google-auth`")
+        return
+
     # ── 1. Live Status from Google Sheets ──
     st.markdown("#### 📡 Live Status")
 
-    client = GSheetsClient()
-    try:
-        client.connect()
-    except FileNotFoundError:
-        st.error("❌ service_account.json tidak ditemukan. Letakkan file di folder paper_trading.")
-        return
-    except Exception as e:
-        st.error(f"❌ Google Sheets connection failed: {e}")
-        return
+    # Cache client connection across rerenders
+    if "_gsheets_client" not in st.session_state:
+        st.session_state._gsheets_client = None
+
+    if st.session_state._gsheets_client is None:
+        client = GSheetsClient()
+        try:
+            client.connect()
+            st.session_state._gsheets_client = client
+        except FileNotFoundError:
+            st.error("❌ service_account.json tidak ditemukan. Letakkan file di folder paper_trading.")
+            return
+        except Exception as e:
+            st.error(f"❌ Google Sheets connection failed: {e}")
+            return
+
+    client = st.session_state._gsheets_client
 
     try:
         modal = client.get_modal()
@@ -2693,10 +2720,10 @@ def render_auto_trade():
             filtered = filtered[filtered["Timing"] == at_timing]
 
     if filtered.empty:
-        st.warning("Tidak ada hasil setelah filter.")
+        st.warning("No results after filtering.")
         return
 
-    st.caption(f"Hasil filter: {len(filtered)} dari {len(df)} total")
+    st.caption(f"Filtered: {len(filtered)} of {len(df)} total")
 
     st.divider()
 

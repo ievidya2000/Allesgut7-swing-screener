@@ -12,7 +12,7 @@ from paper_trading.config import (
     BUY_FEE, SELL_FEE, SHOW_SKIPPED,
     PENDING_ORDER_MAX_DAYS, EXCLUDED_SETUPS
 )
-from paper_trading.gsheets_client import GSheetsClient
+from paper_trading.gsheets_client import GSheetsClient, _safe_float
 from utils.price_utils import round_to_tick
 
 
@@ -104,7 +104,7 @@ def filter_screener_results(results, open_tickers=None, pending_tickers=None,
         ticker = r.get("Ticker", "")
         timing = r.get("Timing", "")
         timing_detail = r.get("Timing Detail", "")
-        score = float(r.get("Score", 0) or 0)
+        score = _safe_float(r.get("Score", 0))
         confirm_type = r.get("Timing Confirm Type", "")
         confirm_value = r.get("Timing Confirm Value")
 
@@ -169,7 +169,8 @@ def filter_screener_results(results, open_tickers=None, pending_tickers=None,
         elif timing in ("WAIT_PULLBACK", "WAIT_PRICE", "WAIT_RETEST"):
             # Punya target_price → bisa jadi limit order
             target_price = r.get("Timing Confirm Value") or r.get("Entry Zone Low")
-            if target_price and float(target_price) > 0:
+            target_val = _safe_float(target_price, 0)
+            if target_val > 0:
                 to_execute.append(r)
                 today_orders += 1
             else:
@@ -247,12 +248,12 @@ def auto_create_orders(results, client=None, dry_run=False):
         ticker_clean = _clean_ticker(ticker)
         timing = r.get("Timing", "")
         timing_detail = r.get("Timing Detail", "")
-        entry_price = round_to_tick(float(r.get("Price", 0) or 0))
-        sl = float(r.get("Stop Loss", 0) or 0)
-        tp1 = float(r.get("TP1", 0) or 0)
-        tp2 = float(r.get("TP2", 0) or 0)
-        tp3 = float(r.get("TP3", 0) or 0)
-        score = float(r.get("Score", 0) or 0)
+        entry_price = round_to_tick(_safe_float(r.get("Price", 0)))
+        sl = _safe_float(r.get("Stop Loss", 0))
+        tp1 = _safe_float(r.get("TP1", 0))
+        tp2 = _safe_float(r.get("TP2", 0))
+        tp3 = _safe_float(r.get("TP3", 0))
+        score = _safe_float(r.get("Score", 0))
         setup = r.get("Setup", "")
         signal = r.get("Signal", "")
 
@@ -263,8 +264,9 @@ def auto_create_orders(results, client=None, dry_run=False):
         else:
             # WAIT conditions → entry di target price
             target_price_raw = r.get("Timing Confirm Value") or r.get("Entry Zone Low")
-            if target_price_raw and float(target_price_raw) > 0:
-                target_entry = round_to_tick(float(target_price_raw))
+            target_val = _safe_float(target_price_raw, 0)
+            if target_val > 0:
+                target_entry = round_to_tick(target_val)
             else:
                 target_entry = entry_price
 
@@ -302,8 +304,8 @@ def auto_create_orders(results, client=None, dry_run=False):
         tp3_qty = qty - tp1_qty - tp2_qty
 
         # Validasi: semua TP qty harus minimal 1 lot
-        if tp1_qty < 1 or tp3_qty < 1:
-            skipped.append({"ticker": ticker, "reason": f"qty terlalu kecil untuk split TP: {qty} lots (TP1={tp1_qty}, TP3={tp3_qty})", "timing": timing})
+        if tp1_qty < 1 or tp2_qty < 1 or tp3_qty < 1:
+            skipped.append({"ticker": ticker, "reason": f"qty terlalu kecil untuk split TP: {qty} lots (TP1={tp1_qty}, TP2={tp2_qty}, TP3={tp3_qty})", "timing": timing})
             continue
 
         print(f"     TP1: {tp1_qty} lots @ Rp {tp1:,.0f} | TP2: {tp2_qty} lots @ Rp {tp2:,.0f} | TP3: {tp3_qty} lots @ Rp {tp3:,.0f}")
@@ -365,11 +367,12 @@ def auto_create_orders(results, client=None, dry_run=False):
     print(f"\n  {'─' * 40}")
     print(f"  SUMMARY")
     print(f"  {'─' * 40}")
-    print(f"  Scanned: {summary['total_scanned']} | Execute: {summary['to_execute']} | Watch: {summary['to_watch']} | Skipped: {summary['skipped']}")
+    print(f"  Scanned: {summary['total_scanned']} | Execute: {summary['to_execute']} | Watch: {summary['to_watch']} | Skipped: {len(skipped)}")
     if summary["orders_created"]:
         print(f"  Orders created: {len(summary['orders_created'])}")
     if summary["errors"]:
         print(f"  Errors: {len(summary['errors'])}")
     print()
 
+    summary["skipped"] = len(skipped)
     return summary

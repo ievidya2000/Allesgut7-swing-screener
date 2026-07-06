@@ -81,6 +81,11 @@ def run_screener():
             atr = last['atr_rm']
             adx = last['adx'] if pd.notna(last['adx']) else 0
 
+            # Skip penny stocks (consistent with Streamlit)
+            if close < 70:
+                skipped["no_setup"] += 1
+                continue
+
             if atr is None or pd.isna(atr) or close <= 0 or atr / close < 0.001:
                 skipped["no_setup"] += 1
                 continue
@@ -236,7 +241,13 @@ def run_screener():
         + w_d3 * df_out[days_col]
         + w_pattern * df_out["Pattern Score"]
     )
-    df_out["Score"] = df_out["TP_Likelihood"]
+    # Normalize score to 0-100 (matches Streamlit normalization)
+    s_min = df_out["TP_Likelihood"].min()
+    s_max = df_out["TP_Likelihood"].max()
+    if s_max > s_min:
+        df_out["Score"] = ((df_out["TP_Likelihood"] - s_min) / (s_max - s_min) * 100).round(1)
+    else:
+        df_out["Score"] = 50.0
     df_out = df_out.sort_values("Score", ascending=False).reset_index(drop=True)
 
     # Print detail boxes grouped by setup (from DataFrame with scores)

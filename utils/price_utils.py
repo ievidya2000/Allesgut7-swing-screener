@@ -1,5 +1,7 @@
 """Price utility functions for IDX stock market."""
 
+import math
+
 
 def round_to_tick(price):
     """Round price to nearest IDX tick size.
@@ -17,6 +19,9 @@ def round_to_tick(price):
     try:
         price = float(price)
     except (ValueError, TypeError):
+        return None
+    
+    if math.isnan(price) or math.isinf(price) or price < 0:
         return None
     
     if price < 200:
