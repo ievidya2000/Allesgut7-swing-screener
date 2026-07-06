@@ -27,6 +27,7 @@ Screening saham IDX berbasis technical analysis dengan **9 setup types**, Monte 
 | **Monte Carlo Simulation** | Probability distribution untuk TP/SL targets dengan 1000+ simulasi |
 | **Reinforcement Learning** | AI-powered ranking menggunakan ensemble model (XGBoost + LightGBM + TabNet) |
 | **Trade Assistant** | Entry zone, stop loss, take profit, timing signal untuk setiap setup |
+| **Auto Paper Trading** | Google Sheets integration, bracket orders, gap detection, force execute |
 | **Deep Analysis** | Multi-timeframe, volume profile, trendlines, risk scenarios |
 | **Performance Tracking** | Walk-forward backtest, calibration check, portfolio simulation vs IHSG |
 | **Adaptive Learning** | Parameter optimization dengan rolling window untuk adaptasi ke market |
@@ -72,9 +73,9 @@ python -m main --analyze BBCA.JK
 
 ## 📊 Dashboard Preview
 
-| Dashboard | Trade Assistant | Performance |
-|-----------|-----------------|-------------|
-| Overview metrics & setup distribution | Entry/SL/TP/Timing signals | Backtest & portfolio simulation |
+| Dashboard | Trade Assistant | Auto Trade | Performance |
+|-----------|-----------------|------------|-------------|
+| Overview metrics & setup distribution | Entry/SL/TP/Timing signals | Google Sheets bracket orders | Backtest & portfolio simulation |
 
 ---
 
@@ -98,10 +99,10 @@ python -m main --analyze BBCA.JK
 
 ```
 screener_v2/
-├── streamlit_app.py          # Main Streamlit dashboard (4 tabs)
+├── streamlit_app.py          # Main Streamlit dashboard (5 tabs)
 ├── config.py                 # Configuration & ticker list (600+ IDX stocks)
 ├── config_email.py           # Email config (secrets.toml / env vars)
-├── data.py                   # Data download & caching (yfinance)
+├── data.py                   # Data download & caching (yfinance, incremental cache)
 ├── indicators.py             # Technical indicators (Ichimoku, SuperTrend, Donchian, ADX)
 ├── signals.py                # Setup detection & signal classification
 ├── analysis.py               # Entry zone, TP/SL, key levels, timing
@@ -111,6 +112,14 @@ screener_v2/
 ├── notifications.py          # Email notification system
 ├── main.py                   # CLI entry point
 ├── requirements.txt          # Python dependencies
+│
+├── paper_trading/            # Auto Paper Trading module
+│   ├── auto_trader.py        # Filter results, create bracket orders
+│   ├── gsheets_client.py     # Google Sheets API client
+│   ├── config.py             # Paper trading config (MAX_LOTS, GAP_TOLERANCE, dll)
+│   ├── Code.gs               # Google Apps Script (gap detection, proximity alert)
+│   ├── run_auto.py           # CLI entry point for auto-trading
+│   └── service_account.json  # Google Cloud service account key
 │
 ├── performance/              # Performance measurement module
 │   ├── journal.py            # SQLite/PostgreSQL journal (predictions + trades)
@@ -186,6 +195,23 @@ screener_v2/
 | `MC_N_SIM` | 1000 | Number of simulations |
 | `MC_HORIZON` | 20 | Forward test horizon (days) |
 
+### Auto Paper Trading
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MAX_LOTS_PER_TICKER` | 100 | Max lots per ticker per order |
+| `GAP_TOLERANCE_PCT` | 2.0% | Max gap % untuk eksekusi (Code.gs sync) |
+| `MAX_AUTO_ORDERS_PER_DAY` | 7 | Max orders baru per hari |
+| `MAX_FORCE_ORDERS` | 13 | Extra orders via force execute (total max 20) |
+| `PENDING_ORDER_MAX_DAYS` | 2 | Expired pending order (hari) |
+| `BUY_FEE / SELL_FEE` | 0.15% / 0.25% | IDX trading fees |
+
+### Cache
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `CACHE_MAX_AGE_HOURS` | 2 | Cache validity (incremental update jika expired) |
+
 ---
 
 ## 🔧 CLI Commands
@@ -198,6 +224,12 @@ python -m main
 
 # Single ticker analysis
 python -m main --analyze BBCA.JK
+
+# Auto-trade dengan dry-run
+python -m main --auto-trade --dry-run
+
+# Auto-trade live
+python -m main --auto-trade
 ```
 
 ### Performance Tools
@@ -274,6 +306,27 @@ export TO_EMAIL="recipient@example.com"
 - **Default**: SQLite (`performance_journal.db`) — auto-created, no setup needed
 - **Production**: PostgreSQL (Supabase free tier) — set `DATABASE_URL` in secrets
 
+### Google Sheets Setup
+
+1. Buat Google Cloud Service Account di [console.cloud.google.com](https://console.cloud.google.com)
+2. Enable Google Sheets API dan Google Drive API
+3. Download JSON key → simpan sebagai `paper_trading/service_account.json`
+4. Buat Google Sheets baru → share ke service account email (Editor access)
+5. Copy `paper_trading/Code.gs` ke Apps Script editor (Extensions → Apps Script)
+6. Jalankan `setupSheets()` di Apps Script untuk buat sheet structure
+7. Set Bot Token dan Chat ID di Settings sheet (B7, B8)
+
+### Telegram Setup
+
+1. Buka Telegram → cari @BotFather
+2. Kirim `/newbot` → ikuti instruksi
+3. Simpan Bot Token yang diberikan
+4. Kirim pesan ke bot Anda (contoh: `/start`)
+5. Buka browser: `https://api.telegram.org/bot<TOKEN>/getUpdates`
+6. Cari `"chat":{"id": XXXXXXX}` → itu Chat ID
+7. Masukkan Token (B7) dan Chat ID (B8) di Settings sheet
+8. Jalankan `testTelegram()` di Apps Script untuk verifikasi
+
 ---
 
 ## 📊 Performance Metrics
@@ -337,10 +390,16 @@ export TO_EMAIL="recipient@example.com"
 | Error | Solution |
 |-------|----------|
 | `ModuleNotFoundError` | Run from repo root (`screener_v2/`), ensure `__init__.py` exists |
-| `yfinance download failed` | Check internet connection; data cached 8h in `cache_yfinance/` |
+| `yfinance download failed` | Check internet connection; data cached 2h in `cache_yfinance/` |
 | `SQLite database is locked` | Close other instances using the database |
 | Email not sending | Check SMTP credentials in `secrets.toml` or env vars |
 | No setups found | Normal in BEAR market — only EARLY_REVERSAL considered |
+| `gspread not installed` | Run: `pip install gspread google-auth` |
+| `service_account.json not found` | Place file in `paper_trading/` directory |
+| `Telegram error: Unauthorized` | Regenerate token from @BotFather |
+| Today Orders shows wrong count | Orders counted by BUY rows only, excludes CANCELLED |
+| Orders auto-cancelled | Gap detection: current price > entry + 2% (09:00-09:15 WIB) |
+| Proximity alert spam | Alert sent once per order, reset when price moves away |
 
 ---
 

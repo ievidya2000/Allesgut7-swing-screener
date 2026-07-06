@@ -20,9 +20,12 @@
 12. [Adaptive Learning](#adaptive-learning)
 13. [Performance Tracking](#performance-tracking)
 14. [Email Notifications](#email-notifications)
-15. [Contoh Workflow Harian](#contoh-workflow-harian)
-16. [FAQ & Tips](#faq--tips)
-17. [Glossary](#glossary)
+15. [Auto Paper Trading](#auto-paper-trading)
+16. [Google Sheets Integration](#google-sheets-integration)
+17. [Telegram Notifications](#telegram-notifications)
+18. [Contoh Workflow Harian](#contoh-workflow-harian)
+19. [FAQ & Tips](#faq--tips)
+20. [Glossary](#glossary)
 
 ---
 
@@ -87,12 +90,13 @@ Data IHSG → Ichimoku Cloud + SuperTrend + ADX → Market Regime
 #### Tahap 2: Data Download & Caching
 
 ```
-yfinance API → Download 1 tahun data OHLCV → Cache ke Parquet (18 jam validity)
+yfinance API → Download 1 tahun data OHLCV → Cache ke Parquet (2 jam validity)
 ```
 
 - Data di-download per batch (lebih cepat)
 - Jika batch gagal, fallback ke download satu per satu
 - Cache mencegah download berulang dalam hari yang sama
+- Incremental update: jika cache expired, download hanya data baru (bukan full)
 
 #### Tahap 3: Scanning Setiap Saham
 
@@ -419,6 +423,34 @@ Buka browser di `http://localhost:8501`
 | Calibration check | Seberapa akurat probabilitas Monte Carlo |
 | Portfolio simulation | Simulasi portfolio vs benchmark IHSG |
 | Win rate, Sharpe, Sortino | Metrics performa utama |
+
+---
+
+### Tab 4: Auto Trade (NEW)
+
+**Fungsi**: Auto-create bracket orders di Google Sheets.
+
+| Fitur | Penjelasan |
+|-------|------------|
+| Live Status | Modal, positions, pending, today orders |
+| Filter | Ikuti filter Results tab atau manual |
+| Preview Orders | Execute (green), Watch (yellow), Skipped (red) |
+| Force Execute | Checkbox untuk force order dari skipped list |
+| Gap Detection | Auto-cancel jika gap > 2% (Code.gs) |
+| Proximity Alert | Telegram alert jika harga dekat target (kirim sekali) |
+
+**Cara Menggunakan**:
+1. Pastikan `service_account.json` ada di folder `paper_trading/`
+2. Buka tab Auto Trade → cek Live Status
+3. Pilih filter (ikuti Results tab atau manual)
+4. Preview orders → centang force execute jika perlu
+5. Klik Execute (dry-run atau live)
+
+**Konfigurasi**:
+- `MAX_AUTO_ORDERS_PER_DAY = 7` — max orders per hari
+- `MAX_FORCE_ORDERS = 13` — extra orders via force (total max 20)
+- `GAP_TOLERANCE_PCT = 2.0%` — max gap untuk eksekusi
+- `MAX_LOTS_PER_TICKER = 100` — max lots per ticker
 
 ---
 
@@ -788,28 +820,168 @@ crontab -e
 
 ---
 
+## Auto Paper Trading
+
+### Apa itu Auto Paper Trading?
+
+Auto Paper Trading adalah sistem yang mengotomatisasi pembuatan bracket order di Google Sheets berdasarkan hasil screening. Sistem ini:
+
+1. **Membaca hasil screening** dari Streamlit tab
+2. **Filter berdasarkan rules** (timing, score, max orders, dll)
+3. **Membuat bracket order** di Google Sheets (1 BUY + 3 SELL + 1 SL)
+4. **Monitoring harga** via Code.gs (autoCheck setiap 1 menit)
+5. **Gap detection** — auto-cancel jika harga gap up > 2%
+6. **Proximity alert** — Telegram notifikasi jika harga dekat target
+
+### Bracket Order Structure
+
+Setiap order terdiri dari 5 baris di Google Sheets:
+
+| Baris | Type | Qty | Target | Warna |
+|-------|------|-----|--------|-------|
+| 1 | BUY | Full qty | Entry price | Green (#E6F4EA) |
+| 2 | SELL (TP1) | 60% | TP1 price | Red (#FCE8E6) |
+| 3 | SELL (TP2) | 25% | TP2 price | Red (#FCE8E6) |
+| 4 | SELL (TP3) | 15% | TP3 price | Red (#FCE8E6) |
+| 5 | STOPLOSS | Full qty | SL price | Yellow (#FDD663) |
+
+### Timing Classification
+
+| Timing | Action | Keterangan |
+|--------|--------|------------|
+| `ENTRY_READY` | Market order | Langsung eksekusi |
+| `WAIT_PULLBACK` | Limit order | Entry di target price (pullback) |
+| `WAIT_PRICE` | Limit order | Entry di target price (breakout level) |
+| `WAIT_RETEST` | Limit order | Entry di retest level |
+| `WAIT_MOMENTUM` | Watchlist | Tidak ada target price |
+| `WAIT_MACD` | Watchlist | Tidak ada target price |
+
+### Force Execute
+
+Jika user ingin mengeksekusi order dari skipped list (melebihi limit):
+
+1. Buka tab Auto Trade
+2. Expand "Skipped" section
+3. Centang checkbox ⚡ untuk order yang mau di-force
+4. Klik Execute
+
+**Limits**:
+- Normal: 7 orders/hari
+- Force: +13 orders/hari
+- Total max: 20 orders/hari
+
+---
+
+## Google Sheets Integration
+
+### Setup
+
+1. **Buat Google Cloud Project**:
+   - Buka [console.cloud.google.com](https://console.cloud.google.com)
+   - Buat project baru atau pilih yang sudah ada
+
+2. **Enable APIs**:
+   - Google Sheets API
+   - Google Drive API
+
+3. **Buat Service Account**:
+   - IAM & Admin → Service Accounts → Create
+   - Download JSON key file
+   - Simpan sebagai `paper_trading/service_account.json`
+
+4. **Share Google Sheets**:
+   - Buat Google Sheets baru
+   - Share ke service account email (Editor access)
+
+5. **Setup Apps Script**:
+   - Buka Google Sheets → Extensions → Apps Script
+   - Copy isi `paper_trading/Code.gs` ke editor
+   - Save (Ctrl+S)
+   - Jalankan `setupSheets()` untuk buat sheet structure
+
+6. **Setup Telegram** (lihat section berikut)
+
+### Sheet Structure
+
+Sistem membuat5 sheets otomatis:
+
+| Sheet | Fungsi |
+|-------|--------|
+| Trade Log | Catatan semua trade (OPEN, PARTIAL, CLOSED) |
+| Pending Orders | Bracket orders (PENDING, MATCHED, CANCELLED) |
+| Dashboard | Overview performa |
+| Settings | Konfigurasi (modal, fees, Telegram) |
+| Equity Curve | Chart pertumbuhan modal |
+
+---
+
+## Telegram Notifications
+
+### Setup
+
+1. **Buat Bot**:
+   - Buka Telegram → cari @BotFather
+   - Kirim `/newbot`
+   - Ikuti instruksi (nama bot, username)
+   - Simpan Bot Token
+
+2. **Dapatkan Chat ID**:
+   - Buka Telegram → cari bot yang baru dibuat
+   - Kirim pesan (contoh: `/start`)
+   - Buka browser: `https://api.telegram.org/bot<TOKEN>/getUpdates`
+   - Cari `"chat":{"id": XXXXXXX}` → itu Chat ID
+
+3. **Masukkan di Settings**:
+   - Buka Google Sheets → Settings sheet
+   - B7: Bot Token
+   - B8: Chat ID
+
+4. **Test**:
+   - Jalankan `testTelegram()` di Apps Script
+   - Cek Telegram → pesan harus muncul
+
+### Notifikasi yang Dikirim
+
+| Event | Pesan |
+|-------|-------|
+| BUY matched | `🔔 BUY MATCHED! BBCA @ 9800 × 10 lots` |
+| SELL matched | `🔔 TAKE PROFIT! BBCA @ 10200 × 6 lots` |
+| Stop loss | `🔔 STOP LOSS! BBCA @ 9500 × 10 lots` |
+| Gap detected | `⚠️ GAP UP DETECTED — BBCA: target 9800 → current 10200 (gap 4.1%)` |
+| Proximity alert | `📊 BBCA BUY @ 9850 (Target: 9800, Gap: 0.51%)` |
+| Daily summary | `📊 DAILY SUMMARY — P&L: Rp 500,000 (0.5%)` |
+
+---
+
 ## Contoh Workflow Harian
 
 ### Pagi Hari (Sebelum Market Buka)
 
 ```
-1. Buka Streamlit dashboard → Tab Dashboard
-2. Cek Market Regime → Apakah BULL/SIDEWAYS/BEAR?
-3. Jika BEAR → Hanya perhatikan EARLY_REVERSAL
-4. Jika BULL → Scan semua setup yang tersedia
-5. Sort berdasarkan Score atau RL Score
-6. Catat top 3-5 saham yang ENTRY_READY
+1. Buka Streamlit dashboard
+2. Run Screener
+3. Cek Market Regime → Apakah BULL/SIDEWAYS/BEAR?
+4. Jika BEAR → Hanya perhatikan EARLY_REVERSAL
+5. Jika BULL → Scan semua setup yang tersedia
+6. Sort berdasarkan Score atau RL Score
+7. Cek tab Auto Trade → Live Status
+8. Preview orders di Auto Trade tab
+9. Pilih force execute jika perlu
 ```
 
-### Saat Market Buka
+### Saat Market Buka (09:00)
 
 ```
-1. Buka Tab Deep Analysis
-2. Analisis saham yang sudah dicatat:
+1. AutoCheck Code.gs berjalan setiap 1 menit
+2. Gap detection (09:00-09:15) → auto-cancel jika gap > 2%
+3. Proximity alert → notifikasi Telegram jika harga dekat target
+4. Cek tab Auto Trade → status orders
+5. Buka Tab Deep Analysis
+6. Analisis saham yang sudah dicatat:
    - Cek chart candlestick + indikator
    - Baca interpretation text
    - Perhatikan entry zone dan timing
-3. Jika timing = ENTRY_READY dan harga di entry zone:
+7. Jika timing = ENTRY_READY dan harga di entry zone:
    - Hitung position size berdasarkan risk management
    - Set stop loss di level yang ditentukan
    - Entry dengan limit order di entry zone
@@ -825,6 +997,7 @@ crontab -e
    - TP3 level (untuk jual 15%)
 2. Monitor via Tab Results → filter status ACTIVE
 3. Jangan panik jika harga turun ke SL — itu risk management
+4. Cek Telegram untuk notifikasi order matched/cancelled
 ```
 
 ### Sore Hari (Setelah Market Tutup)
@@ -832,10 +1005,11 @@ crontab -e
 ```
 1. Jalankan screening lagi (jika belum otomatis):
    python -m main
-2. Cek email untuk daily summary
+2. Cek Telegram untuk daily summary
 3. Review trade yang sudah closed
-4. Update journal (otomatis via sistem)
-5. Siapkan watchlist untuk besok
+4. Review orders yang matched/cancelled di Google Sheets
+5. Update journal (otomatis via sistem)
+6. Siapkan watchlist untuk besok
 ```
 
 ### Mingguan
@@ -845,6 +1019,7 @@ crontab -e
 2. Review calibration → Apakah Monte Carlo akurat?
 3. Cek adaptive learning → Apakah parameter perlu diupdate?
 4. Review trade journal → Pattern dari winning vs losing trades
+5. Review Google Sheets → Apakah ada order yang stuck?
 ```
 
 ---
@@ -899,6 +1074,9 @@ TICKERS = [
 5. **Jangan override sistem**: Jika sistem bilang SL di 9700, jangan geser ke 9500 karena "sayang".
 6. **Start kecil**: Mulai dengan position size kecil sampai paham cara kerja sistem.
 7. **Belajar dari losing trades**: Cek journal untuk melihat pattern dari trade yang gagal.
+8. **Gunakan dry-run**: Sebelum live, cek dulu dengan dry-run untuk memastikan order sesuai.
+9. **Cek Telegram**: Pastikan Telegram notifikasi aktif untuk monitor order.
+10. **Force execute bijak**: Jangan force order jika setup tidak kuat.
 
 ---
 
@@ -911,6 +1089,7 @@ TICKERS = [
 | **AVWAP** | Anchored Volume Weighted Average Price |
 | **Base** | Periode konsolidasi harga (sideways) |
 | **Bollinger Bands** | Indikator volatilitas berbasis standard deviation |
+| **Bracket Order** | Order structure: BUY + 3 SELL (TP1/TP2/TP3) + SL |
 | **Breakout** | Harga menembus level resistance/support |
 | **Bull/Bear** | Market naik (bull) atau turun (bear) |
 | **Candlestick** | Representasi grafik harga (open, high, low, close) |
@@ -920,9 +1099,12 @@ TICKERS = [
 | **Entry Zone** | Range harga optimal untuk masuk posisi |
 | **Fibonacci** | Rasio matematika untuk support/resistance |
 | **Flag Pattern** | Pola konsolidasi setelah kenaikan tajam |
+| **Force Execute** | Ekskusi order dari skipped list (melebihi limit) |
+| **Gap Detection** | Auto-cancel order jika harga gap up > 2% |
 | **HVN** | High Volume Node — zona dengan volume perdagangan tinggi |
 | **Ichimoku Cloud** | Indikator trend Jepang (Tenkan, Kijun, Senkou) |
 | **IHSG** | Indeks Harga Saham Gabungan — benchmark IDX |
+| **Incremental Cache** | Update cache dengan data baru (bukan full download) |
 | **Inside Bar** | Candle yang range-nya di dalam candle sebelumnya |
 | **MACD** | Moving Average Convergence Divergence |
 | **Markov Model** | Model statistik dengan state transitions |
@@ -942,6 +1124,7 @@ TICKERS = [
 | **SuperTrend** | Indikator trend berbasis ATR |
 | **Support** | Level harga di mana tekanan beli meningkat |
 | **Swing Trading** | Strategi trading dengan holding 2-20 hari |
+| **Telegram Bot** | Bot notifikasi via Telegram (@BotFather) |
 | **TP1/TP2/TP3** | Take Profit level 1/2/3 |
 | **VCP** | Volatility Contraction Pattern (Mark Minervini) |
 | **Volume Delta** | Selisih antara volume beli dan jual |
