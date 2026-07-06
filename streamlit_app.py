@@ -2750,22 +2750,49 @@ def render_auto_trade():
     # Preview columns
     preview_cols = ["Ticker", "Setup", "Score", "Price", "Timing", "Stock Regime"]
 
+    # Column config for preview tables
+    preview_col_config = {
+        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+        "Setup": st.column_config.TextColumn("Setup", width="medium"),
+        "Score": st.column_config.NumberColumn("Score", format="%.1f"),
+        "Price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
+        "Timing": st.column_config.TextColumn("Timing", width="medium"),
+        "Stock Regime": st.column_config.TextColumn("Regime", width="small"),
+    }
+
+    def _apply_row_color(df, bg_color):
+        """Apply uniform row background color (matches Code.gs style)."""
+        return df.style.map(lambda _: f"background-color: {bg_color}", axis=1)
+
+    def _color_setup_cell(val):
+        """Color Setup column by setup type (matches Dashboard style)."""
+        return f"background-color: {COLOR_MAP.get(val, '#888')}; color: black; font-weight: bold"
+
     if to_execute:
         st.success(f"**✅ Execute ({len(to_execute)}):**")
         exec_df = pd.DataFrame(to_execute)
         exec_avail = [c for c in preview_cols if c in exec_df.columns]
-        st.dataframe(exec_df[exec_avail], use_container_width=True, hide_index=True)
+        styled_exec = _apply_row_color(exec_df[exec_avail], "#E6F4EA")
+        if "Setup" in exec_avail:
+            styled_exec = styled_exec.map(_color_setup_cell, subset=["Setup"])
+        st.dataframe(styled_exec, column_config=preview_col_config,
+                     use_container_width=True, hide_index=True)
 
     if to_watch:
         st.info(f"**⏳ Watch ({len(to_watch)}):**")
         watch_df = pd.DataFrame(to_watch)
         watch_avail = [c for c in preview_cols if c in watch_df.columns]
-        st.dataframe(watch_df[watch_avail], use_container_width=True, hide_index=True)
+        styled_watch = _apply_row_color(watch_df[watch_avail], "#FFF8E1")
+        if "Setup" in watch_avail:
+            styled_watch = styled_watch.map(_color_setup_cell, subset=["Setup"])
+        st.dataframe(styled_watch, column_config=preview_col_config,
+                     use_container_width=True, hide_index=True)
 
     if skipped:
         with st.expander(f"**⏭️ Skip ({len(skipped)})**"):
             skip_df = pd.DataFrame(skipped)
-            st.dataframe(skip_df, use_container_width=True, hide_index=True)
+            styled_skip = _apply_row_color(skip_df, "#FCE8E6")
+            st.dataframe(styled_skip, use_container_width=True, hide_index=True)
 
     if not to_execute and not to_watch:
         st.info("Tidak ada order yang bisa dieksekusi.")
