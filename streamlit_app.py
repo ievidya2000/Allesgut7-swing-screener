@@ -2811,7 +2811,7 @@ def render_auto_trade():
                 st.error("Execution failed. Silakan cek log.")
 
     # ── 5. Show last execution summary ──
-    if "_auto_trade_summary" in st.session_state:
+    if "_auto_trade_summary" in st.session_state and st.session_state._auto_trade_summary is not None:
         summary = st.session_state._auto_trade_summary
         if summary.get("orders_created") or summary.get("errors"):
             st.divider()
