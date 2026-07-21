@@ -1,6 +1,7 @@
 """Deploy current model to production with logging."""
 
 import sys
+import argparse
 import pickle
 from pathlib import Path
 
@@ -89,17 +90,41 @@ def show_log():
         print(f"  {entry['timestamp']} | {entry['action']} | v{entry.get('version')} | AUC={entry.get('auc', 0):.4f} | {entry.get('reason', '')}")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        cmd = sys.argv[1]
-        if cmd == "rollback":
-            rollback()
-        elif cmd == "versions":
-            show_versions()
-        elif cmd == "log":
-            show_log()
-        else:
-            print(f"Unknown command: {cmd}")
-            print("Usage: python deploy_production.py [rollback|versions|log]")
+def cli_main():
+    parser = argparse.ArgumentParser(
+        prog="python deploy_production.py",
+        description="Model Deployment Manager - Deploy, rollback, and track model versions",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+commands:
+  (no args)       Deploy current model to production
+  rollback        Rollback to previous model version
+  versions        List all model versions
+  log             Show deployment history log
+
+examples:
+  python deploy_production.py             Deploy model to production
+  python deploy_production.py rollback    Rollback to previous version
+  python deploy_production.py versions    List all versions
+  python deploy_production.py log         Show deployment log
+        """
+    )
+    parser.add_argument(
+        "command", nargs="?", choices=["rollback", "versions", "log"],
+        help="Command to run (omit for deploy)"
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "rollback":
+        rollback()
+    elif args.command == "versions":
+        show_versions()
+    elif args.command == "log":
+        show_log()
     else:
         main()
+
+
+if __name__ == "__main__":
+    cli_main()

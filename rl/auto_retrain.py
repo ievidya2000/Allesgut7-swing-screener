@@ -241,3 +241,62 @@ def get_retrain_status():
         "latest_metrics": latest_metrics,
         "history_count": len(history),
     }
+
+
+def cli_main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m rl.auto_retrain",
+        description="RL Auto-Retrain - Retrain model when enough new data available",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  python -m rl.auto_retrain                      Auto retrain (need 50+ new trades)
+  python -m rl.auto_retrain --force              Force retrain regardless of data
+  python -m rl.auto_retrain --min-new-trades 30  Lower threshold to 30 trades
+  python -m rl.auto_retrain --status             Show retrain status
+        """
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Force retrain even if not enough new trades"
+    )
+    parser.add_argument(
+        "--min-new-trades", type=int, default=50,
+        help="Minimum new trades since last retrain (default: 50)"
+    )
+    parser.add_argument(
+        "--status", action="store_true",
+        help="Show retrain status only (no training)"
+    )
+
+    args = parser.parse_args()
+
+    if args.status:
+        status = get_retrain_status()
+        print("\n=== RETRAIN STATUS ===")
+        print(f"  Total trades: {status['total_trades']}")
+        print(f"  Trades since retrain: {status['trades_since_retrain']}")
+        print(f"  Last retrain: {status['last_retrain_time'] or 'Never'}")
+        print(f"  Last deployed: {status['last_deployed']}")
+        print(f"  Last reason: {status['last_reason'] or 'N/A'}")
+        if status['latest_metrics']:
+            m = status['latest_metrics']
+            print(f"  Latest AUC: {m.get('classifier_auc', 0):.4f}")
+            print(f"  Latest Accuracy: {m.get('classifier_accuracy', 0):.4f}")
+            print(f"  Latest Spearman: {m.get('ranker_spearman', 0):.4f}")
+        return
+
+    result = auto_retrain(min_new_trades=args.min_new_trades, force=args.force)
+
+    if not result["retrained"]:
+        print(f"\nSkipped: {result['reason']}")
+    elif result["deployed"]:
+        print(f"\nNew model deployed! {result['reason']}")
+    else:
+        print(f"\nKept old model. {result['reason']}")
+
+
+if __name__ == "__main__":
+    cli_main()

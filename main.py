@@ -1,4 +1,5 @@
 import sys
+import argparse
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore", message=".*could not convert.*")
@@ -449,20 +450,59 @@ def cli_analyze(ticker):
     print(report)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1] == "--analyze":
-        cli_analyze(sys.argv[2].upper())
-    elif "--auto-trade" in sys.argv:
-        dry_run = "--dry-run" in sys.argv
+def cli_main():
+    parser = argparse.ArgumentParser(
+        prog="python -m main",
+        description="IDX Swing Trading Screener - AI-Powered Stock Scanner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  python -m main                          Run full screening 600+ saham IDX
+  python -m main --analyze BBCA.JK        Analisis mendalam 1 ticker
+  python -m main --auto-trade             Auto paper trading ke Google Sheets
+  python -m main --auto-trade --dry-run   Simulasi tanpa eksekusi
+  python -m main --auto-trade --force     Paksa retrain meski tidak ada data baru
+
+Documentation:
+  screener_v2/guide.md    User guide lengkap
+  screener_v2/readme.md   Quick start & architecture
+        """
+    )
+    parser.add_argument(
+        "--analyze", metavar="TICKER",
+        help="Analisis mendalam 1 ticker (contoh: BBCA.JK)"
+    )
+    parser.add_argument(
+        "--auto-trade", action="store_true",
+        help="Jalankan auto paper trading ke Google Sheets"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Simulasi tanpa eksekusi (gabung dengan --auto-trade)"
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Paksa retrain meskipun tidak ada data baru (gabung dengan --auto-trade)"
+    )
+
+    args = parser.parse_args()
+
+    if args.analyze:
+        cli_analyze(args.analyze.upper())
+    elif args.auto_trade:
         df_out = run_screener()
         if df_out is not None and not df_out.empty:
             try:
                 from paper_trading.run_auto import run_auto_paper_trading
-                run_auto_paper_trading(df_out, dry_run=dry_run)
+                run_auto_paper_trading(df_out, dry_run=args.dry_run, force=args.force)
             except ImportError as e:
-                print(f"\n  ❌ Paper trading module error: {e}")
+                print(f"\n  Paper trading module error: {e}")
                 print("  Install: pip install gspread google-auth")
             except Exception as e:
-                print(f"\n  ❌ Auto-trade error: {e}")
+                print(f"\n  Auto-trade error: {e}")
     else:
         run_screener()
+
+
+if __name__ == "__main__":
+    cli_main()
