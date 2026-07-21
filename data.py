@@ -82,37 +82,6 @@ def load_ticker_cache(ticker, start=None, end=None):
     return None
 
 
-def load_ticker_cache_incremental(ticker, start=None, end=None):
-    """Cache valid → use directly. Cache expired → append new data."""
-    cached_df = load_ticker_cache(ticker, start, end)
-    if cached_df is not None:
-        return cached_df
-
-    parquet_path = _get_cache_path(ticker, start, end, "parquet")
-    old_df = None
-    if parquet_path.exists():
-        try:
-            old_df = pd.read_parquet(parquet_path)
-        except Exception:
-            pass
-
-    if old_df is not None and len(old_df) >= 50:
-        last_date = old_df.index.max()
-        new_start = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
-        new_end = datetime.now().strftime("%Y-%m-%d")
-
-        if new_start <= new_end:
-            new_df = download_single_ticker(ticker, start=new_start, end=new_end)
-            if new_df is not None and len(new_df) > 0:
-                merged = pd.concat([old_df, new_df])
-                merged = merged[~merged.index.duplicated(keep='last')]
-                merged = merged.sort_index()
-                save_ticker_cache(ticker, merged, start, end)
-                return merged
-
-        return old_df
-
-    return download_single_ticker(ticker, start, end)
 
 
 def _find_matching_cache(ticker, start, end):
@@ -145,7 +114,7 @@ def _find_matching_cache(ticker, start, end):
     return best_df
 
 
-def normalize_yfinance_df(df, ticker=None):
+def normalize_yfinance_df(df, ticker=None, min_rows=50):
     if df is None:
         if ticker:
             print(f"    [{ticker}] Skipped: no data returned")
@@ -187,15 +156,15 @@ def normalize_yfinance_df(df, ticker=None):
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
 
-    if len(df) < 50:
+    if len(df) < min_rows:
         if ticker:
-            print(f"    [{ticker}] Skipped: only {len(df)} rows (< 50)")
+            print(f"    [{ticker}] Skipped: only {len(df)} rows (< {min_rows})")
         return None
 
     return df
 
 
-def download_single_ticker(ticker, start=None, end=None):
+def download_single_ticker(ticker, start=None, end=None, min_rows=50):
     try:
         dl_kwargs = {
             "interval": DOWNLOAD_INTERVAL,
@@ -211,7 +180,7 @@ def download_single_ticker(ticker, start=None, end=None):
             dl_kwargs["period"] = DOWNLOAD_PERIOD
 
         df = yf.download(ticker, **dl_kwargs)
-        df = normalize_yfinance_df(df, ticker)
+        df = normalize_yfinance_df(df, ticker, min_rows=min_rows)
         if df is not None:
             save_ticker_cache(ticker, df, start, end)
             return df
@@ -234,6 +203,7 @@ def download_tickers_batch(tickers, start=None, end=None):
             "progress": False,
             "threads": True,
             "group_by": "ticker",
+            "timeout": 60,
         }
         if start and end:
             dl_kwargs["start"] = start
@@ -296,7 +266,6 @@ def download_tickers_batch(tickers, start=None, end=None):
 
 def get_all_market_data(tickers, start=None, end=None):
     market_data = {}
-    tickers_incremental = []
     tickers_full = []
 
     print("Checking cache...")
@@ -305,24 +274,12 @@ def get_all_market_data(tickers, start=None, end=None):
         if cached_df is not None and len(cached_df) >= 50:
             market_data[ticker] = cached_df
         else:
-            parquet_path = _get_cache_path(ticker, start, end, "parquet")
-            if parquet_path.exists():
-                tickers_incremental.append(ticker)
-            else:
-                tickers_full.append(ticker)
+            tickers_full.append(ticker)
 
-    print(f"  Cache hit: {len(market_data)}, Incremental: {len(tickers_incremental)}, Full download: {len(tickers_full)}")
-
-    if tickers_incremental:
-        print(f"  Incremental update: {len(tickers_incremental)} tickers...")
-        for ticker in tickers_incremental:
-            df = load_ticker_cache_incremental(ticker, start, end)
-            if df is not None and len(df) >= 50:
-                market_data[ticker] = df
-            time.sleep(0.1)
+    print(f"  Cache hit: {len(market_data)}, Full download: {len(tickers_full)}")
 
     if tickers_full:
-        print(f"  Full download: {len(tickers_full)} tickers...")
+        print(f"  Downloading: {len(tickers_full)} tickers...")
         for i in range(0, len(tickers_full), BATCH_SIZE):
             batch = tickers_full[i:i + BATCH_SIZE]
             downloaded = download_tickers_batch(batch, start, end)

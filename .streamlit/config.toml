@@ -9,6 +9,8 @@ font = "sans serif"
 maxUploadSize = 10
 runOnSave = false
 headless = true
+enableCORS = false
+enableXsrfProtection = false
 
 [browser]
 gatherUsageStats = false

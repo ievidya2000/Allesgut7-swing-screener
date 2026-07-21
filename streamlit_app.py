@@ -606,12 +606,14 @@ def render_sidebar():
 
         # Run button
         if st.button("🚀 Run Screener", type="primary", use_container_width=True):
-            with st.spinner("Loading data..."):
-                md = cached_load_data()
-                jkse = cached_jkse()
-                mr = determine_market_regime(jkse) if jkse is not None else "SIDEWAYS"
-                st.session_state.market_data = md
-                st.session_state.market_regime = mr
+            progress = st.progress(0, text="Starting...")
+            progress.progress(10, text="Loading market data...")
+            md = cached_load_data()
+            progress.progress(50, text="Loading IHSG...")
+            jkse = cached_jkse()
+            mr = determine_market_regime(jkse) if jkse is not None else "SIDEWAYS"
+            st.session_state.market_data = md
+            st.session_state.market_regime = mr
 
             # Include data dates in hash to detect stale data
             data_dates = []
@@ -619,10 +621,12 @@ def render_sidebar():
                 if len(df) > 0:
                     data_dates.append(str(df.index[-1]))
             market_hash = hash((frozenset(md.keys()), tuple(sorted(data_dates))))
+            progress.progress(70, text="Running screener...")
             df_out, skipped = cached_run_screener(market_hash, mr)
             st.session_state.screening_df = df_out
             st.session_state.screening_done = True
 
+            progress.progress(100, text="Done!")
             st.success(f"Done! {len(df_out)} setups found.")
             st.caption(f"Skipped: short_data={skipped.get('short_data',0)}, no_setup={skipped.get('no_setup',0)}, errors={skipped.get('error',0)}")
 
@@ -2662,14 +2666,39 @@ def render_auto_trade():
 
     client = st.session_state._gsheets_client
 
-    try:
-        modal = client.get_modal()
-        open_positions = client.count_open_positions()
-        pending_count = client.count_pending_orders()
-        today_orders = client.count_today_orders_all()
-    except Exception as e:
-        st.error(f"❌ Gagal membaca data dari Google Sheets: {e}")
-        return
+    with st.spinner("Loading trading status from Google Sheets..."):
+        try:
+            # TTL cache: skip fetch if data is <60 seconds old
+            import time
+            now = time.time()
+            last_refresh = st.session_state.get("_gs_last_refresh", 0)
+            cache_valid = (now - last_refresh) < 60
+
+            if cache_valid and "_gs_data" in st.session_state:
+                gs = st.session_state._gs_data
+                open_trades = gs["open_trades"]
+                pending_orders = gs["pending_orders"]
+                modal = gs["modal"]
+            else:
+                open_trades = client.get_open_trades()
+                pending_orders = client.get_pending_orders()
+                modal = client.get_modal()
+                st.session_state._gs_data = {
+                    "open_trades": open_trades,
+                    "pending_orders": pending_orders,
+                    "modal": modal,
+                }
+                st.session_state._gs_last_refresh = now
+
+            open_positions = len([t for t in open_trades if t["status"] in ("OPEN", "PARTIAL")])
+            pending_count = len(pending_orders)
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_orders = len([o for o in pending_orders if o["date"].startswith(today) and o["type"] == "BUY"])
+            open_tickers = {t["ticker"] for t in open_trades}
+            pending_tickers = {o["ticker"] for o in pending_orders}
+        except Exception as e:
+            st.error(f"❌ Gagal membaca data dari Google Sheets: {e}")
+            return
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("💰 Modal", f"Rp {modal:,.0f}")
@@ -2738,13 +2767,6 @@ def render_auto_trade():
 
     # ── 3. Preview Orders ──
     st.markdown("#### 📋 Preview Orders")
-
-    try:
-        open_tickers = client.get_open_tickers()
-        pending_tickers = client.get_pending_tickers()
-    except Exception as e:
-        st.error(f"❌ Gagal mengambil data open/pending: {e}")
-        return
 
     results_list = filtered.to_dict("records")
     to_execute, to_watch, skipped = filter_screener_results(
@@ -2830,9 +2852,12 @@ def render_auto_trade():
             else:
                 st.session_state._forced_tickers = []
 
-    if not to_execute and not to_watch:
-        st.info("Tidak ada order yang bisa dieksekusi.")
+    if not to_execute and not to_watch and not skipped:
+        st.info("Tidak ada order yang bisa dieksekusi. Jalankan screening terlebih dahulu.")
         return
+
+    if not to_execute and not to_watch and skipped:
+        st.warning("⚠️ Tidak ada normal order. Gunakan **Force checkbox** di bawah untuk eksekusi manual.")
 
     st.divider()
 
