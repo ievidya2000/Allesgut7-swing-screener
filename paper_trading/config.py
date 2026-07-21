@@ -63,9 +63,6 @@ EXCLUDED_SETUPS = ["EARLY_REVERSAL"]
 # WAIT_PULLBACK/WAIT_PRICE/WAIT_RETEST → limit order di target price
 ALLOWED_TIMING = [
     "ENTRY_READY",
-    "WAIT_PULLBACK",
-    "WAIT_PRICE",
-    "WAIT_RETEST",
 ]
 
 # Max order baru per hari (mencegah over-trading)

@@ -19,7 +19,7 @@ from paper_trading.gsheets_client import GSheetsClient
 from paper_trading.auto_trader import auto_create_orders, filter_screener_results
 
 
-def run_auto_paper_trading(results, dry_run=False):
+def run_auto_paper_trading(results, dry_run=False, force=False):
     """
     Jalankan auto paper trading dari hasil screener.
 
@@ -76,19 +76,19 @@ def run_auto_paper_trading(results, dry_run=False):
     print(f"     Skip if pending: {SKIP_IF_ALREADY_PENDING}")
 
     # Auto-create orders
-    summary = auto_create_orders(results_list, client=client, dry_run=dry_run)
+    summary = auto_create_orders(results_list, client=client, dry_run=dry_run, force=force)
 
-    # Kirim notifikasi jika ada order (skip saat dry_run)
-    if not dry_run and summary and summary["orders_created"]:
+    # Kirim notifikasi jika ada order
+    if summary and summary["orders_created"]:
         try:
-            _send_notification(client, summary)
+            _send_notification(client, summary, dry_run=dry_run)
         except Exception as e:
             print(f"  ⚠️  Notifikasi gagal: {e}")
 
     return summary
 
 
-def _send_notification(client, summary):
+def _send_notification(client, summary, dry_run=False):
     """Kirim notifikasi via Telegram (jika dikonfigurasi)."""
     if requests is None:
         print("  ⚠️  requests not installed, skip Telegram notification")
@@ -103,9 +103,10 @@ def _send_notification(client, summary):
             return
 
         orders = summary["orders_created"]
-        msg = f"🤖 AUTO PAPER TRADING\n\n"
+        prefix = "🔍 DRY RUN — " if dry_run else ""
+        msg = f"🤖 {prefix}AUTO PAPER TRADING\n\n"
         msg += f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')} WIB\n"
-        msg += f"📊 Orders created: {len(orders)}\n\n"
+        msg += f"📊 Orders {'preview' if dry_run else 'created'}: {len(orders)}\n\n"
 
         for o in orders:
             emoji = "✅" if o.get("timing") == "ENTRY_READY" else "🟡"

@@ -7,7 +7,7 @@ from paper_trading.config import (
     INITIAL_CAPITAL, RISK_PER_TRADE_PCT, MAX_POSITIONS, MAX_LOTS_PER_TICKER,
     TP1_PCT, TP2_PCT, TP3_PCT,
     MIN_SCORE, SETUP_MIN_SCORE, SETUP_ALLOWED_REGIMES,
-    ALLOWED_TIMING, MAX_AUTO_ORDERS_PER_DAY,
+    ALLOWED_TIMING, MAX_AUTO_ORDERS_PER_DAY, MAX_FORCE_ORDERS,
     SKIP_IF_ALREADY_OPEN, SKIP_IF_ALREADY_PENDING,
     BUY_FEE, SELL_FEE, SHOW_SKIPPED,
     PENDING_ORDER_MAX_DAYS, EXCLUDED_SETUPS
@@ -214,7 +214,13 @@ def auto_create_orders(results, client=None, dry_run=False, force=False):
 
     # Filter results
     if force:
-        to_execute = list(results)
+        # Enforce MAX_FORCE_ORDERS limit
+        max_today = MAX_AUTO_ORDERS_PER_DAY + MAX_FORCE_ORDERS
+        if today_orders >= max_today:
+            print(f"  ⚠️  Max orders reached ({today_orders}/{max_today}), cannot force more")
+            to_execute = []
+        else:
+            to_execute = list(results)[:max_today - today_orders]
         to_watch = []
         skipped = []
     else:
@@ -226,6 +232,14 @@ def auto_create_orders(results, client=None, dry_run=False, force=False):
             open_positions=open_positions,
             max_positions=MAX_POSITIONS,
         )
+
+    # Idempotency: re-query pending tickers after filter to avoid duplicates
+    if not dry_run and to_execute:
+        pending_tickers = client.get_pending_tickers() if SKIP_IF_ALREADY_PENDING else set()
+        original_count = len(to_execute)
+        to_execute = [r for r in to_execute if _clean_ticker(r.get("Ticker", "")) not in pending_tickers]
+        if len(to_execute) < original_count:
+            print(f"  ℹ️  {original_count - len(to_execute)} orders skipped (already pending)")
 
     # Summary
     summary = {
@@ -314,6 +328,11 @@ def auto_create_orders(results, client=None, dry_run=False, force=False):
             skipped.append({"ticker": ticker, "reason": f"qty terlalu kecil untuk split TP: {qty} lots (TP1={tp1_qty}, TP2={tp2_qty}, TP3={tp3_qty})", "timing": timing})
             continue
 
+        # Validasi: TP1% + TP2% + TP3% harus = 100
+        if TP1_PCT + TP2_PCT + TP3_PCT != 100:
+            skipped.append({"ticker": ticker, "reason": f"TP split invalid: {TP1_PCT}+{TP2_PCT}+{TP3_PCT}% != 100%", "timing": timing})
+            continue
+
         print(f"     TP1: {tp1_qty} lots @ Rp {tp1:,.0f} | TP2: {tp2_qty} lots @ Rp {tp2:,.0f} | TP3: {tp3_qty} lots @ Rp {tp3:,.0f}")
         print(f"     Risk: {RISK_PER_TRADE_PCT}% = Rp {modal * RISK_PER_TRADE_PCT / 100:,.0f} | Qty: {qty} lots")
 
@@ -327,6 +346,11 @@ def auto_create_orders(results, client=None, dry_run=False, force=False):
 
         # Create bracket order di Google Sheets
         try:
+            # Re-check position limit before creating
+            if client.count_open_positions() >= MAX_POSITIONS:
+                print(f"  ⚠️  Max positions reached ({MAX_POSITIONS}), stopping")
+                break
+
             result = client.create_bracket_order(
                 ticker=ticker_clean,
                 qty=qty,
@@ -340,6 +364,9 @@ def auto_create_orders(results, client=None, dry_run=False, force=False):
                 tp3_pct=TP3_PCT,
                 notes=notes,
             )
+            # Verify write succeeded
+            if not client.verify_bracket_write(result["order_id"]):
+                print(f"     → WARNING: Write verification failed for {result['order_id']}")
             print(f"     → Bracket order {result['order_id']} created")
             summary["orders_created"].append({
                 "ticker": ticker, "qty": qty, "entry": target_entry,
@@ -367,7 +394,7 @@ def auto_create_orders(results, client=None, dry_run=False, force=False):
         print(f"  SKIPPED ({len(skipped)})")
         print(f"  {'─' * 40}")
         for s in skipped:
-            print(f"  ⏭️  {s['ticker']} — {s['reason']}")
+            print(f"  ⏭️  {s.get('Ticker', s.get('ticker', '?'))} — {s['reason']}")
 
     # Print summary
     print(f"\n  {'─' * 40}")

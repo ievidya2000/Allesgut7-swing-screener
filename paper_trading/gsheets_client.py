@@ -2,6 +2,7 @@
 
 import gspread
 import uuid
+import time
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 
@@ -237,6 +238,37 @@ class GSheetsClient:
             self.pending.format(f'A{start_row + i}:L{start_row + i}', RED)
         self.pending.format(f'A{start_row + 4}:L{start_row + 4}', YELLOW)
 
+    def _append_with_retry(self, rows, max_retries=3):
+        """Append rows with exponential backoff retry."""
+        for attempt in range(max_retries):
+            try:
+                self.pending.append_rows(rows, value_input_option="USER_ENTERED")
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️  GSheets API error (attempt {attempt + 1}/{max_retries}): {e}")
+                    time.sleep(wait)
+                else:
+                    raise
+
+    def verify_bracket_write(self, order_id):
+        """Verify bracket order was written correctly by reading back last 5 rows."""
+        try:
+            all_values = self.pending.get_all_values()
+            if len(all_values) < 6:
+                return False
+            last_5 = all_values[-5:]
+            # Check if the BUY row (first of bracket) has our order_id
+            if last_5[0][0] != order_id:
+                print(f"  ⚠️  Verify failed: expected ID {order_id}, got {last_5[0][0]}")
+                return False
+            print(f"  ✅ Verified: {order_id} written at rows {len(all_values)-4}-{len(all_values)}")
+            return True
+        except Exception as e:
+            print(f"  ⚠️  Verify error: {e}")
+            return False
+
     def create_bracket_order(self, ticker, qty, entry_price, tp1_price, tp2_price,
                               tp3_price, sl_price, tp1_pct=60, tp2_pct=25, tp3_pct=15,
                               notes=""):
@@ -319,7 +351,7 @@ class GSheetsClient:
         ])
 
         # Append semua rows ke Pending Orders sheet (batch call)
-        self.pending.append_rows(rows, value_input_option="USER_ENTERED")
+        self._append_with_retry(rows)
 
         # Apply row colors (matching Code.gs convention)
         last_row = len(self.pending.get_all_values())
@@ -404,12 +436,10 @@ class GSheetsClient:
                 except ValueError:
                     continue
 
-            # Cek apakah order sudah expired
-            if order_date < cutoff:
-                parent_id = order.get("parent_id")
-                if not parent_id:
-                    # Ini parent order sendiri (BUY entry), gunakan ID sendiri
-                    parent_id = order["id"]
+            # Only cancel BUY orders that are expired
+            # Do NOT cancel SELL/STOPLOSS children of matched BUY orders
+            if order_date < cutoff and order.get("type") == "BUY":
+                parent_id = order["id"]
                 parent_ids_to_cancel.add(parent_id)
                 expired.append(order)
 
