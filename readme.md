@@ -95,6 +95,10 @@ python -m main --analyze BBCA.JK
 
 **Note**: During BEAR market regime, only `EARLY_REVERSAL` setups are active.
 
+<div align="center">
+  <img src="4-setup-class.png" alt="Setup Classification" width="100%">
+</div>
+
 ---
 
 ## 🏗️ Architecture
@@ -170,6 +174,36 @@ screener_v2/
 Yahoo Finance API → 600+ IDX tickers → 50+ technical indicators → Setup detection
 → Entry zone / SL / TP calculation → Monte Carlo simulation (1000x) → RL ranking → Output
 ```
+
+---
+
+## 📈 Technical Indicators
+
+<div align="center">
+  <img src="1-tech-indicator.png" alt="Technical Indicators" width="100%">
+</div>
+
+Indikator teknikal deterministik untuk analisis harga, volume, momentum, volatilitas, dan struktur pasar. Semua indikator dihitung dari data OHLCV dan digunakan sebagai fitur, filter, serta sinyal pendukung.
+
+---
+
+## 📊 Statistical & Probabilistic Models
+
+<div align="center">
+  <img src="2-Stats-prob-models.png" alt="Statistical & Probabilistic Models" width="100%">
+</div>
+
+Model statistik dan probabilistik untuk estimasi peluang, simulasi, dan penilaian komposit. Meliputi Markov regime-switching, Monte Carlo simulation, composite scoring, dan probability calibration.
+
+---
+
+## 🤖 Machine Learning Pipeline
+
+<div align="center">
+  <img src="3-ml-ensemble.png" alt="Machine Learning Ensemble" width="100%">
+</div>
+
+Model ensemble untuk memprediksi probabilitas profit dan meranking setup saham. Menggunakan 60+ fitur, training pipeline dengan walk-forward validation, dan auto-retrain mechanism.
 
 ---
 
