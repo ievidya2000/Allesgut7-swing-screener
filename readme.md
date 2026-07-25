@@ -296,6 +296,208 @@ Skor Pola = Σ(bullish_conf) − Σ(bearish_conf × 0.7)
 
 ---
 
+## ⚡ Core Flow — Business Logic Layer
+
+<div align="center">
+  <img src="core-flow-bussiness-logic-layer.png" alt="Core Flow — Business Logic Layer" width="100%">
+</div>
+
+**Intelligent Stock Screening System** — Pipeline end-to-end 10 tahap yang mengubah data mentah pasar saham menjadi rekomendasi trading yang terkalibrasi dan ter-rank. Sistem ini dirancang untuk menyaring 600+ saham Indonesia Stock Exchange (IDX) secara otomatis, mendeteksi pola setup, menghitung probabilitas profit, dan menghasilkan peringkat kandidat berbasis machine learning.
+
+---
+
+### Overview
+
+Setiap hari, sistem secara otomatis menjalankan pipeline dari akuisisi data hingga menghasilkan ranked stock list. Alur ini mencerminkan bagaimana data mengalir melalui setiap layer bisnis — dari data mentah menjadi keputusan trading yang actionable. Pipeline ini bersifat **deterministic di tahap awal** (indikator, filter, klasifikasi) dan **probabilistic di tahap akhir** (Monte Carlo, scoring, ML ranking), mencerminkan transisi dari pengukuran objektif ke estimasi peluang.
+
+---
+
+### 10 Tahap Pipeline
+
+#### Tahap 1: Data Acquisition
+
+Sistem memulai dengan mengambil data mentah dari Yahoo Finance API untuk seluruh universe saham IDX (600+ ticker dengan akhiran `.JK`). Data yang diambil meliputi OHLCV (Open, High, Low, Close, Volume) historis dan indeks pasar IHSG (^JKSE) sebagai benchmark. Data di-cache secara incremental untuk efisiensi — refresh hanya dilakukan jika cache sudah berumur lebih dari 2 jam.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Ticker Universe | 600+ saham IDX (Bursa Efek Indonesia) |
+| Data Source | Yahoo Finance API (yfinance) |
+| Benchmark | IHSG Index (^JKSE) |
+| **Output** | **Raw Market Data** — OHLCV historis siap diproses |
+
+---
+
+#### Tahap 2: Feature Engineering
+
+Data mentah OHLCV ditransformasi menjadi **56+ technical indicators** yang mencakup lima kategori utama: **Trend** (Ichimoku, SuperTrend, Moving Averages), **Momentum** (RSI, MACD, Stochastic), **Volume** (OBV, A/D Line, Volume Delta), **Volatility** (Bollinger Bands, ATR), dan **Structure** (Donchian Channel, Elliott Wave, Fibonacci). Setiap indikator dihitung secara deterministik — tidak ada parameter yang di-fit ke data, sehingga menghindari look-ahead bias.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Jumlah Indikator | 56+ teknikal indicators |
+| Kategori | Trend, Momentum, Volume, Volatility, Structure |
+| Metode | Deterministic calculation dari OHLCV |
+| **Output** | **Feature Dataset** — matriks fitur siap untuk screening |
+
+---
+
+#### Tahap 3: Market State Analyzer
+
+Sebelum screening, sistem menentukan **kondisi pasar saat ini** menggunakan Markov Regime-Switching Model. Model ini mengklasifikasikan pasar ke dalam tiga regime: **Bull** (tren naik), **Bear** (tren turun), dan **Sideways** (konsolidasi). Deteksi regime menggunakan Ichimoku Cloud (posisi harga terhadap cloud), SuperTrend (arah trend), dan ADX Filter (kekuatan trend). Hasil deteksi regime menentukan setup mana yang aktif — misalnya, saat BEAR regime, hanya `EARLY_REVERSAL` yang diaktifkan.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Model | Markov Regime-Switching (2-regime) |
+| Indikator | Ichimoku, SuperTrend, ADX Filter |
+| Regime | Bull / Bear / Sideways |
+| **Output** | **Market Regime** — kondisi pasar untuk filtering setup |
+
+---
+
+#### Tahap 4: Screening & Filter
+
+Ticker-ticker yang lolos filtering awal diverifikasi kualitasnya melalui empat filter: **Data Quality Filter** (kelengkapan data), **Price Filter** (harga ≥ Rp 70 untuk menghindari saham penny), **ATR Validation** (volatilitas memadai untuk trading), dan **Liquidity Filter** (volume harian ≥ Rp 500 Juta untuk memastikan eksekusi bisa dilakukan tanpa slippage berlebih). Filter ini memastikan hanya saham-saham yang layak trading yang masuk ke tahap selanjutnya.
+
+| Komponen | Threshold | Tujuan |
+|----------|-----------|--------|
+| Data Quality | Kelengkapan data | Pastikan data valid |
+| Price Filter | ≥ Rp 70 | Hindari saham penny |
+| ATR Validation | Volatilitas memadai | Pastikan ada pergerakan |
+| Liquidity Filter | ≥ Rp 500 Juta/hari | Pastikan eksekusi bisa dilakukan |
+| **Output** | **Candidate Ticker** — saham yang lolos semua filter |
+
+---
+
+#### Tahap 5: Signal Classification
+
+Setiap kandidat ticker dievaluasi terhadap **9 setup klasifikasi** secara bersamaan menggunakan rule-based detection. Setup yang dideteksi meliputi: Pre Breakout, VCP (Volatility Contraction Pattern), ATR Flag, Breakout, Pullback, Reversal, dan lainnya. Setiap setup memiliki kondisi spesifik yang harus terpenuhi — misalnya, VCP membutuhkan vol contract shrinking, higher lows, dan ADX > 20. Jika semua kondisi terpenuhi, setup aktif dengan skor kepercayaan (0–100).
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Jumlah Setup | 9 klasifikasi |
+| Metode | Rule-based detection |
+| Contoh | Pre Breakout, VCP, Breakout, Pullback, Reversal |
+| **Output** | **Setup Signal** — sinyal dengan tipe setup dan skor |
+
+---
+
+#### Tahap 6: Trade Analysis
+
+Untuk setiap setup yang aktif, sistem menghitung parameter trading yang lengkap: **Entry Zone** (rentang harga masuk), **Stop Loss** (level risiko berdasarkan ATR), **Take Profit** (target 1R, 2R, 3R dengan risk-reward ratio), **Risk-Reward Ratio**, dan **Position Sizing** (berdasarkan risk per trade 2%). Perhitungan menggunakan ATR-based stops dan Fibonacci extensions untuk target profit.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Entry Zone | Rentang harga masuk optimal |
+| Stop Loss | ATR-based (1.5 × ATR) |
+| Take Profit | TP1 (1R), TP2 (2R), TP3 (3R) |
+| Position Sizing | 2% risk per trade |
+| **Output** | **Trade Plan** — rencana trading lengkap |
+
+---
+
+#### Tahap 7: Risk & Probabilistic Engine
+
+Parameter trading dihitung probabilitasnya menggunakan **Monte Carlo Simulation** (1,000 paths) dan **Markov Regime Estimation**. Sistem menghasilkan probabilitas TP1, TP2, TP3, dan SL untuk setiap kandidat. Selain itu, dihitung juga **expectancy** (nilai harapan dari setiap trade) dan **probability report** yang lengkap. Parameter Markov di-cache per ticker untuk efisiensi komputasi.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Monte Carlo | 1,000 simulasi per ticker |
+| Markov Estimation | Regime-aware probability |
+| Output | Probabilitas TP/SL, Expectancy |
+| **Output** | **Probability Report** — laporan probabilitas lengkap |
+
+---
+
+#### Tahap 8: Pattern Recognition
+
+Sistem mendeteksi **20+ candlestick patterns** untuk membaca sentimen pasar jangka pendek. Pola-pola ini meliputi reversal patterns (Engulfing, Hammer, Morning Star), continuation patterns (Three White Soldiers, Rising Three Methods), gap patterns, dan doji variations. Setiap pola memberikan skor bullish atau bearish, yang digabungkan menjadi **pattern score** dan **bias** (Bullish/Bearish/Neutral).
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Jumlah Pola | 20+ candlestick patterns |
+| Kategori | Reversal, Continuation, Gap, Doji, Single Bar |
+| Output | Pattern Score + Bias |
+| **Output** | **Pattern Score** — skor pola dan bias pasar |
+
+---
+
+#### Tahap 9: Decision Scoring
+
+Semua komponen — setup signal, trade plan, probability report, dan pattern score — digabungkan menjadi **composite score** menggunakan weighted scoring. Skor komposit mempertimbangkan probabilitas TP, profit factor, rata-rata hari holding, dan pattern score. Skor dinormalisasi menggunakan Min-Max Scaling ke skala 0–100. Kandidat dengan skor tertinggi di-rank untuk tahap akhir.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Metode | Weighted composite scoring |
+| Komponen | P(TP), Profit Factor, AvgDays, PatternScore |
+| Normalization | Min-Max Scaling (0–100) |
+| **Output** | **Scoring Result** — kandidat ter-ranking |
+
+---
+
+#### Tahap 10: ML Ranking Engine (Reinforcement Learning)
+
+Tahap akhir menggunakan **ensemble machine learning model** untuk menghasilkan final ranking. Model ensemble terdiri dari 6 classifier (RandomForest 60%, XGBoost 10%, LightGBM 10%, TabNet 20%, LogisticRegression 15%, HistGradientBoosting 5%) yang dilatih menggunakan 60+ fitur. Training menggunakan walk-forward validation (TimeSeriesSplit) dan hyperparameter tuning via Optuna. Output akhir adalah **final ranking** yang mempertimbangkan semua aspek — teknikal, fundamental, probabilitas, dan pola.
+
+| Komponen | Deskripsi |
+|----------|-----------|
+| Model | 6 classifier ensemble |
+| Fitur | 60+ features |
+| Validation | Walk-forward (TimeSeriesSplit) |
+| Tuning | Optuna hyperparameter optimization |
+| **Output** | **Final Ranking** — peringkat akhir kandidat |
+
+---
+
+### Supporting Analytics & Optimization
+
+Di bawah pipeline utama, terdapat empat modul pendukung yang berjalan secara paralel:
+
+| Modul | Fungsi | Deskripsi |
+|-------|--------|-----------|
+| **Performance Reporting** | Pelaporan | Daily report, top pick list, performance summary. Memantau hasil screening dan trading dari waktu ke waktu. |
+| **Paper Trading Simulator** | Simulasi | Simulasi eksekusi, track P&L, trade journal. Menguji strategi tanpa risiko modal nyata. |
+| **Adaptive Optimization** | Optimasi | Grid search, Sharpe ratio evaluation, parameter tuning. Menyesuaikan parameter sistem secara rolling-window agar tetap adaptif terhadap perubahan pasar. |
+| **Explainability Engine** | Analisis | Deep analysis, rekomendasi, insight pasar. Menjelaskan mengapa sebuah kandidat dipilih atau ditolak. |
+
+---
+
+### Output Akhir
+
+Pipeline menghasilkan tiga output utama:
+
+1. **Recommended Stock List (Ranking)** — Daftar saham yang direkomendasikan beserta peringkatnya, diurutkan dari skor tertinggi.
+2. **Detailed Analysis & Trade Plan** — Analisis lengkap per saham: entry zone, stop loss, take profit targets, probabilitas, dan rekomendasi.
+3. **Export** — Hasil bisa diekspor ke tiga platform: **Web** (Streamlit dashboard), **Telegram** (notifikasi otomatis), dan **Google Sheets** (paper trading integration).
+
+---
+
+### Alur Data Ringkas
+
+```
+Yahoo Finance API (600+ IDX tickers)
+  → 56+ Technical Indicators
+    → Market Regime Detection (Bull/Bear/Sideways)
+      → Quality Screening (Price ≥70, Liquidity ≥Rp500Jt)
+        → 9 Setup Classification (Rule-Based)
+          → Trade Plan (Entry/SL/TP/Position Sizing)
+            → Monte Carlo + Markov Probability
+              → 20+ Candlestick Pattern Score
+                → Composite Weighted Scoring
+                  → ML Ensemble Ranking (60+ features)
+                    → Final Ranked Stock List
+```
+
+---
+
+### Catatan
+
+- Pipeline bersifat **deterministic di tahap 1–5** dan **probabilistic di tahap 6–10**
+- Semua indikator dihitung dari data OHLCV tanpa curve-fitting
+- Walk-forward validation mencegah look-ahead bias
+- Ensemble model meningkatkan robustness dan mengurangi overfitting
+- Sistem berjalan otomatis setiap hari via Streamlit Cloud atau CLI
+
+---
+
 ## 🏗️ Architecture
 
 ```
