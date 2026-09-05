@@ -204,8 +204,8 @@ def generate_pdf_from_df(df, filename):
     """Generates a landscape PDF report of the screener results."""
     if not HAS_FPDF:
         return None
-    pdf = FPDF()
-    pdf.add_page(orientation="L")
+    pdf = FPDF(orientation='L')
+    pdf.add_page()
     pdf.set_font("Arial", size=9)
     
     pdf.set_font("Arial", 'B', 14)
@@ -215,7 +215,6 @@ def generate_pdf_from_df(df, filename):
     pdf.cell(270, 10, txt=f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
     pdf.ln(5)
     
-    # Select key columns to fit landscape PDF nicely
     cols_to_show = [c for c in ["Ticker", "Setup", "Price", "Score", "RL Score", "Profit Prob", "Stop Loss", "TP1", "TP2", "TP3", "Timing"] if c in df.columns]
     if not cols_to_show:
         cols_to_show = list(df.columns)[:10]
@@ -355,6 +354,7 @@ def cached_run_screener(market_data_hash, market_regime):
             cloud_bottom_val = min(senkou_a_val, senkou_b_val)
             avwap_val = _safe_float(last.get("avwap"))
             vol_ma_val = _safe_float(last.get("vol_ma"))
+            vol_std_val = 1.0
             di_spread_val = (plus_di_val - minus_di_val) / max(di_sum_val, 1)
             score_val = 0
             
@@ -395,12 +395,16 @@ def cached_run_screener(market_data_hash, market_regime):
                 "price_to_avwap": (close - avwap_val) / max(close, 1) * 100 if avwap_val > 0 else 0,
                 "tenkan_kijun_spread": (tenkan_val - kijun_val) / max(abs(kijun_val), 1) * 100,
                 "cloud_thickness": (cloud_top_val - cloud_bottom_val) / max(close, 1) * 100,
-                "return_5d": 0, "volume_zscore": 0, "plus_di": plus_di_val, "minus_di": minus_di_val,
-                "obv_rising": 1 if last.get("obv_rising") else 0, "ad_rising": 1 if last.get("ad_rising") else 0,
+                "return_5d": 0, "volume_zscore": 0,
+                "plus_di": plus_di_val, "minus_di": minus_di_val,
+                "obv_rising": 1 if last.get("obv_rising") else 0,
+                "ad_rising": 1 if last.get("ad_rising") else 0,
                 "delta_positive": 1 if last.get("delta_positive") else 0,
                 "volume_delta": np.clip(_safe_float(last.get("volume_delta")), -1e9, 1e9),
-                "rsi": _safe_float(last.get("rsi")), "rsi_oversold": 1 if last.get("rsi_oversold") else 0,
-                "stoch_k": _safe_float(last.get("stoch_k")), "stoch_oversold": 1 if last.get("stoch_oversold") else 0,
+                "rsi": _safe_float(last.get("rsi")),
+                "rsi_oversold": 1 if last.get("rsi_oversold") else 0,
+                "stoch_k": _safe_float(last.get("stoch_k")),
+                "stoch_oversold": 1 if last.get("stoch_oversold") else 0,
                 "macd_histogram": _safe_float(last.get("macd_histogram")),
                 "macd_bullish_cross": 1 if last.get("macd_bullish_cross") else 0,
                 "rsi_bullish_div": 1 if last.get("rsi_bullish_div") else 0,
@@ -521,7 +525,9 @@ def cached_run_screener(market_data_hash, market_regime):
                 for col in rank_features:
                     row['rl_features'][f'{col}_rank'] = row.get(f'{col}_rank', 0.5)
                     
-        rl_scores, profit_probs, rl_inputs = [], [], []
+        rl_scores = []
+        profit_probs = []
+        rl_inputs = []
         for _, row in df_out.iterrows():
             rl_feat = row.get("rl_features", None)
             if rl_feat is None or (isinstance(rl_feat, float) and pd.isna(rl_feat)):
@@ -845,6 +851,10 @@ def render_results():
     st.divider()
     st.subheader("📥 Export Results")
     
+    analysis_date = datetime.now().strftime("%d%b%Y")
+    csv_filename = f"hasil_screener_{analysis_date}.csv"
+    pdf_filename = f"hasil_screener_{analysis_date}.pdf"
+    
     export_df = filtered.copy()
     for tp in ["TP1", "TP2", "TP3"]:
         src = f"Prob({tp})"
@@ -871,13 +881,12 @@ def render_results():
     num_cols = export_df.select_dtypes(include=["float", "float64"]).columns
     export_df[num_cols] = export_df[num_cols].round(2)
     
+    csv_content = export_df.to_csv(index=False)
+    csv_bytes = csv_content.encode("utf-8")
+    
     col_csv, col_pdf = st.columns(2)
     
     with col_csv:
-        csv_content = export_df.to_csv(index=False)
-        csv_bytes = csv_content.encode("utf-8")
-        analysis_date = datetime.now().strftime("%d%b%Y")
-        csv_filename = f"hasil_screener_{analysis_date}.csv"
         st.download_button(
             label="📥 Download CSV (Sortable in Excel)",
             data=csv_bytes,
@@ -888,10 +897,8 @@ def render_results():
         
     with col_pdf:
         if HAS_FPDF:
-            pdf_bytes = generate_pdf_from_df(export_df, "screener_results.pdf")
+            pdf_bytes = generate_pdf_from_df(export_df, pdf_filename)
             if pdf_bytes:
-                analysis_date = datetime.now().strftime("%d%b%Y")
-                pdf_filename = f"hasil_screener_{analysis_date}.pdf"
                 st.download_button(
                     label="📥 Download PDF (Static Report)",
                     data=pdf_bytes,
@@ -2070,6 +2077,7 @@ def render_auto_trade():
     if skipped:
         with st.expander(f"**⏭ Skip ({len(skipped)})** — Pilih untuk force execute"):
             skip_df = pd.DataFrame(skipped)
+            skip_df["Force"] = False
             editor_cols = ["Force", "Ticker", "Setup", "Score", "reason"]
             editor_avail = [c for c in editor_cols if c in skip_df.columns]
             disabled_indices = skip_df[skip_df.get("Force_disabled", False) == True].index.tolist()
@@ -2138,10 +2146,10 @@ def render_auto_trade():
                         st.error(f"**❌ Error:** {len(summary['errors'])} order gagal")
                         for err in summary["errors"]:
                             st.write(f"  • **{err['ticker']}** — {err['error']}")
-            st.rerun()
-        else:
-            st.error("Execution failed. Silakan cek log.")
-            
+                    st.rerun()
+                else:
+                    st.error("Execution failed. Silakan cek log.")
+                    
     if "_auto_trade_summary" in st.session_state and st.session_state._auto_trade_summary is not None:
         summary = st.session_state._auto_trade_summary
         if summary.get("orders_created") or summary.get("errors"):
