@@ -7,6 +7,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import streamlit as st
 import pandas as pd
+import io
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
