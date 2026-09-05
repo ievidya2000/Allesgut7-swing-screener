@@ -969,6 +969,18 @@ def render_results():
     csv_content = export_df.to_csv(index=False)
     csv = csv_content.encode("utf-8")
     st.download_button("📥 Download CSV", csv, csv_filename, "text/csv", use_container_width=True)
+    # ===== EXCEL DOWNLOAD BUTTON =====
+output = io.BytesIO()
+with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    export_df.to_excel(writer, index=False, sheet_name='Screener Results')
+output.seek(0)
+st.download_button(
+    label="📥 Download Results as Excel",
+    data=output.getvalue(),
+    file_name=f"hasil_screener_{analysis_date}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True,
+)
 
     # Per-Setup Top 5
     st.divider()
