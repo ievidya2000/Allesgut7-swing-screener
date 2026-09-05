@@ -948,28 +948,49 @@ def render_results():
             lambda x: float(str(x).rstrip('%')) if pd.notna(x) and str(x).strip() not in ('', 'None', 'nan') else None
         )
 
-    # Curated column list for export
-    CSV_COLS = [
-        "Ticker", "Signal", "Setup", "Price", "Stock Regime",
-        "Score", "RL Score", "Profit Prob",
-        "Stop Loss", "SL Wide", "TP1", "TP2", "TP3",
-        "Entry Zone Low", "Entry Zone High", "Entry Strategy",
-        "Profit %", "Risk %",
-        "Prob_TP1", "Prob_TP2", "Prob_TP3", "Prob_SL",
-        "Avg Days TP1", "Avg Days TP2", "Avg Days TP3",
-        "Timing", "Timing Confirm Type", "Timing Confirm Value", "ADX",
-    ]
-    avail_cols = [c for c in CSV_COLS if c in export_df.columns]
-    export_df = export_df[avail_cols].sort_values("Score", ascending=False)
+# CSV download with clean columns
+analysis_date = datetime.now().strftime("%d%b%Y")
+csv_filename = f"hasil_screener_{analysis_date}.csv"
 
-    # Round numeric columns
-    num_cols = export_df.select_dtypes(include=["float", "float64"]).columns
-    export_df[num_cols] = export_df[num_cols].round(2)
+# Build clean probability columns (float, not string with %)
+export_df = filtered.copy()
+for tp in ["TP1", "TP2", "TP3"]:
+    src = f"Prob({tp})"
+    dst = f"Prob_{tp}"
+    if src in export_df.columns:
+        export_df[dst] = export_df[src].apply(
+            lambda x: float(str(x).rstrip('%')) if pd.notna(x) and str(x).strip() not in ('', 'None', 'nan') else None
+        )
+if "Prob(SL)" in export_df.columns:
+    export_df["Prob_SL"] = export_df["Prob(SL)"].apply(
+        lambda x: float(str(x).rstrip('%')) if pd.notna(x) and str(x).strip() not in ('', 'None', 'nan') else None
+    )
 
-    csv_content = export_df.to_csv(index=False)
-    csv = csv_content.encode("utf-8")
-    st.download_button("📥 Download CSV", csv, csv_filename, "text/csv", use_container_width=True)
-    # ===== EXCEL DOWNLOAD BUTTON =====
+# Curated column list for export
+CSV_COLS = [
+    "Ticker", "Signal", "Setup", "Price", "Stock Regime",
+    "Score", "RL Score", "Profit Prob",
+    "Stop Loss", "SL Wide", "TP1", "TP2", "TP3",
+    "Entry Zone Low", "Entry Zone High", "Entry Strategy",
+    "Profit %", "Risk %",
+    "Prob_TP1", "Prob_TP2", "Prob_TP3", "Prob_SL",
+    "Avg Days TP1", "Avg Days TP2", "Avg Days TP3",
+    "Timing", "Timing Confirm Type", "Timing Confirm Value", "ADX",
+]
+
+avail_cols = [c for c in CSV_COLS if c in export_df.columns]
+export_df = export_df[avail_cols].sort_values("Score", ascending=False)
+
+# Round numeric columns
+num_cols = export_df.select_dtypes(include=["float", "float64"]).columns
+export_df[num_cols] = export_df[num_cols].round(2)
+
+# CSV DOWNLOAD
+csv_content = export_df.to_csv(index=False)
+csv = csv_content.encode("utf-8")
+st.download_button("📥 Download CSV", csv, csv_filename, "text/csv", use_container_width=True)
+
+# ===== EXCEL DOWNLOAD BUTTON =====
 output = io.BytesIO()
 with pd.ExcelWriter(output, engine='openpyxl') as writer:
     export_df.to_excel(writer, index=False, sheet_name='Screener Results')
@@ -981,7 +1002,6 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=True,
 )
-
     # Per-Setup Top 5
     st.divider()
     st.subheader("🎯 Top 5 Per Setup (Ranked by RL Score)")
