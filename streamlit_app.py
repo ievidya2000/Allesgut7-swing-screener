@@ -204,38 +204,44 @@ def generate_pdf_from_df(df, filename):
     """Generates a landscape PDF report of the screener results."""
     if not HAS_FPDF:
         return None
-    pdf = FPDF(orientation='L')
-    pdf.add_page()
-    pdf.set_font("Arial", size=9)
-    
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(270, 10, txt="Swing Screener Results", ln=True, align='C')
-    pdf.ln(5)
-    pdf.set_font("Arial", size=10)
-    pdf.cell(270, 10, txt=f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
-    pdf.ln(5)
-    
-    cols_to_show = [c for c in ["Ticker", "Setup", "Price", "Score", "RL Score", "Profit Prob", "Stop Loss", "TP1", "TP2", "TP3", "Timing"] if c in df.columns]
-    if not cols_to_show:
-        cols_to_show = list(df.columns)[:10]
+    try:
+        pdf = FPDF(orientation='L')
+        pdf.add_page()
+        pdf.set_font("Arial", size=9)
         
-    col_width = 270 / len(cols_to_show)
-    
-    pdf.set_font("Arial", 'B', 8)
-    for col in cols_to_show:
-        pdf.cell(col_width, 8, str(col), border=1, align='C')
-    pdf.ln()
-    
-    pdf.set_font("Arial", size=7)
-    for row in df[cols_to_show].itertuples(index=False):
-        for item in row:
-            text = str(item) if pd.notna(item) else ""
-            if len(str(text)) > 18:
-                text = str(text)[:15] + "..."
-            pdf.cell(col_width, 7, str(text), border=1, align='C')
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(270, 10, txt="Swing Screener Results", ln=True, align='C')
+        pdf.ln(5)
+        pdf.set_font("Arial", size=10)
+        pdf.cell(270, 10, txt=f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
+        pdf.ln(5)
+        
+        cols_to_show = [c for c in ["Ticker", "Setup", "Price", "Score", "RL Score", "Profit Prob", "Stop Loss", "TP1", "TP2", "TP3", "Timing"] if c in df.columns]
+        if not cols_to_show:
+            cols_to_show = list(df.columns)[:10]
+            
+        col_width = 270 / len(cols_to_show)
+        
+        pdf.set_font("Arial", 'B', 8)
+        for col in cols_to_show:
+            pdf.cell(col_width, 8, str(col), border=1, align='C')
         pdf.ln()
         
-    return pdf.output(dest='S').encode('latin1')
+        pdf.set_font("Arial", size=7)
+        for row in df[cols_to_show].itertuples(index=False):
+            for item in row:
+                text = str(item) if pd.notna(item) else ""
+                if len(str(text)) > 18:
+                    text = str(text)[:15] + "..."
+                pdf.cell(col_width, 7, str(text), border=1, align='C')
+            pdf.ln()
+            
+        # SUPERGOD FIX: fpdf2 returns bytearray natively, old fpdf returned string
+        output = pdf.output(dest='S')
+        return bytes(output) if isinstance(output, (bytearray, bytes)) else output.encode('latin1')
+    except Exception as e:
+        print(f"PDF generation skipped due to error: {e}")
+        return None
 
 @st.cache_data(ttl=3600, show_spinner="Running screener...")
 def cached_run_screener(market_data_hash, market_regime):
