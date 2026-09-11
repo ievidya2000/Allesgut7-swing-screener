@@ -1,7 +1,7 @@
 import sys
 import warnings
-warnings.filterwarnings("ignore", message=".could not convert.")
-warnings.filterwarnings("default", message=".*valid.convergent.")
+warnings.filterwarnings("ignore", message=".*could not convert.*")
+warnings.filterwarnings("default", message=".*valid.convergent.*")
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 import streamlit as st
@@ -162,18 +162,69 @@ for key in ["screening_df", "market_data", "market_regime", "screening_done",
     if key not in st.session_state:
         st.session_state[key] = None if key not in ("screening_done",) else False
 
-# CACHED FUNCTIONS - REMOVED @st.cache_data TO FORCE SUPABASE ACTIVITY
+# ==============================================================================
+# SUPABASE ACTIVITY FIX: Removed @st.cache_data to force database hits
+# ==============================================================================
 def load_market_data(start_date=None, end_date=None):
-    """Load market data - NO CACHE to keep Supabase active"""
     return get_all_market_data(TICKERS, start=start_date, end=end_date)
 
 def load_jkse():
-    """Load IHSG data - NO CACHE to keep Supabase active"""
     return get_jkse_data()
 
 def load_fundamental():
-    """Load fundamental data - NO CACHE to keep Supabase active"""
     return get_fundamental_data(TICKERS)
+
+# Setup encoding (from training data analysis)
+SETUP_ENCODING = {
+    "PRE_BREAKOUT": 3.60,
+    "BASE_ON_BASE": 3.21,
+    "PULLBACK_MA20": 1.95,
+    "EARLY_REVERSAL": 0.01,
+    "ACCUMULATION": 0.58,
+    "BREAKOUT": 0.14,
+    "TIGHT_BASE_BREAKOUT": 0.07,
+}
+REGIME_ENCODING = {
+    "BULL": 5.0,
+    "SIDEWAYS": 3.0,
+    "BEAR": 1.0,
+}
+
+def generate_pdf_from_df(df, filename):
+    """Generates a landscape PDF report of the screener results."""
+    if not HAS_FPDF:
+        return None
+    try:
+        pdf = FPDF(orientation='L')
+        pdf.add_page()
+        pdf.set_font("Arial", size=9)
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(270, 10, txt="Swing Screener Results", ln=True, align='C')
+        pdf.ln(5)
+        pdf.set_font("Arial", size=10)
+        pdf.cell(270, 10, txt=f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
+        pdf.ln(5)
+        cols_to_show = [c for c in ["Ticker", "Setup", "Price", "Score", "RL Score", "Profit Prob", "Stop Loss", "TP1", "TP2", "TP3", "Timing"] if c in df.columns]
+        if not cols_to_show:
+            cols_to_show = list(df.columns)[:10]
+        col_width = 270 / len(cols_to_show)
+        pdf.set_font("Arial", 'B', 8)
+        for col in cols_to_show:
+            pdf.cell(col_width, 8, str(col), border=1, align='C')
+        pdf.ln()
+        pdf.set_font("Arial", size=7)
+        for row in df[cols_to_show].itertuples(index=False):
+            for item in row:
+                text = str(item) if pd.notna(item) else ""
+                if len(str(text)) > 18:
+                    text = str(text)[:15] + "..."
+                pdf.cell(col_width, 7, str(text), border=1, align='C')
+            pdf.ln()
+        output = pdf.output(dest='S')
+        return bytes(output) if isinstance(output, (bytearray, bytes)) else output.encode('latin1')
+    except Exception as e:
+        print(f"PDF generation skipped due to error: {e}")
+        return None
 
 @st.cache_data(ttl=3600, show_spinner="Running screener...")
 def cached_run_screener(market_data_hash, market_regime):
@@ -439,6 +490,7 @@ def cached_run_screener(market_data_hash, market_regime):
             df_out["Score"] = 50.0
         
         try:
+            # UPDATED: Uses uncached load_fundamental to ensure DB activity
             fundamental_df = load_fundamental()
             fundamental_features = ['pe_ratio', 'forward_pe', 'pb_ratio', 'roe', 'revenue_growth', 'earnings_growth', 'dividend_yield', 'log_market_cap', 'ps_ratio', 'book_value']
             for col in fundamental_features:
@@ -501,32 +553,32 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
-        # 🟢 SUPABASE PING BUTTON - KEEP PROJECT ACTIVE
+        # ==============================================================================
+        # SUPABASE ACTIVITY FIX: Manual Ping Button to keep project awake
+        # ==============================================================================
         st.markdown("---")
         st.markdown("**🟢 Keep Supabase Active**")
         if st.button("📡 Ping Supabase Now", use_container_width=True):
             try:
-                # Force a database query to register activity
                 from supabase import create_client
                 import os
                 supabase_url = os.getenv("SUPABASE_URL")
                 supabase_key = os.getenv("SUPABASE_KEY")
                 if supabase_url and supabase_key:
                     supabase = create_client(supabase_url, supabase_key)
-                    # Simple query to count rows in any table
+                    # Simple query to count rows in 'predictions' table to register activity
                     result = supabase.table("predictions").select("id").limit(1).execute()
                     st.success("✅ Supabase pinged successfully!")
                     st.caption(f"Query returned {len(result.data)} rows")
                 else:
-                    st.warning("⚠️ Supabase credentials not found")
+                    st.warning("⚠️ Supabase credentials not found in environment variables")
             except Exception as e:
                 st.error(f"❌ Ping failed: {str(e)}")
-        
         st.markdown("---")
         
         regime = st.session_state.get("market_regime")
         if regime:
-            emoji = {"BULL":"🟢","SIDEWAYS":"🟡","BEAR":""}.get(regime,"")
+            emoji = {"BULL":"🟢","SIDEWAYS":"🟡","BEAR":"🔴"}.get(regime,"⚪")
             color = {"BULL":"#66BB6A","SIDEWAYS":"#FFA726","BEAR":"#EF5350"}.get(regime,"#90A4AE")
             st.markdown(f"""
             <div style="background:{color}15; border: 1px solid {color}30; border-radius: 10px; padding: 12px 16px; text-align: center; margin-bottom: 16px;">
@@ -545,7 +597,7 @@ def render_sidebar():
         if IS_POSTGRES:
             st.markdown("""
             <div style="background:#66BB6A15; border: 1px solid #66BB6A30; border-radius: 10px; padding: 8px 16px; text-align: center; margin-bottom: 12px;">
-                <span style="color:#66BB6A; font-weight: 500; font-size: 0.8rem;"> Database: PostgreSQL (persistent)</span>
+                <span style="color:#66BB6A; font-weight: 500; font-size: 0.8rem;">☁ Database: PostgreSQL (persistent)</span>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -555,12 +607,14 @@ def render_sidebar():
             </div>
             """, unsafe_allow_html=True)
         
-        if st.button(" Run Screener", type="primary", use_container_width=True):
+        if st.button("🚀 Run Screener", type="primary", use_container_width=True):
             progress = st.progress(0, text="Starting...")
             progress.progress(10, text="Loading market data...")
-            md = load_market_data()  # REMOVED CACHE
+            # UPDATED: Uses uncached load_market_data
+            md = load_market_data()
             progress.progress(50, text="Loading IHSG...")
-            jkse = load_jkse()  # REMOVED CACHE
+            # UPDATED: Uses uncached load_jkse
+            jkse = load_jkse()
             mr = determine_market_regime(jkse) if jkse is not None else "SIDEWAYS"
             st.session_state.market_data = md
             st.session_state.market_regime = mr
@@ -622,7 +676,7 @@ def render_sidebar():
                         selected_regimes.append(r)
                 st.session_state._filter_regimes = selected_regimes
                 
-                with st.expander(" Per-Setup Min Score"):
+                with st.expander("⚙ Per-Setup Min Score"):
                     st.caption("Override global Min Score per setup")
                     setup_scores = {}
                     for s in SETUP_ORDER:
@@ -632,11 +686,7 @@ def render_sidebar():
                 
                 timing_opts = ["All"] + [k for k, v in TIMING_MAP.items() if v[0] in ("🟢", "🟡")]
                 st.selectbox("Timing", timing_opts, key="filt_timing")
-                
                 st.divider()
-
-# [Rest of the file continues - DASHBOARD TAB, RESULTS TAB, etc. remain unchanged]
-# I'll include the rest of the functions below...
 
 # DASHBOARD TAB
 def render_dashboard():
@@ -696,7 +746,7 @@ def render_dashboard():
     st.divider()
     
     if "Timing" in df.columns:
-        st.subheader(" Timing Overview")
+        st.subheader("⏱ Timing Overview")
         timing_counts = df["Timing"].value_counts()
         tcols = st.columns(min(len(timing_counts), 6))
         for i, (timing, count) in enumerate(timing_counts.items()):
@@ -823,7 +873,7 @@ def render_results():
     
     # --- EXPORT SECTION ---
     st.divider()
-    st.subheader(" Export Results")
+    st.subheader("📥 Export Results")
     
     analysis_date = datetime.now().strftime("%d%b%Y")
     csv_filename = f"hasil_screener_{analysis_date}.csv"
@@ -881,10 +931,10 @@ def render_results():
                     use_container_width=True
                 )
         else:
-            st.info(" Tip: Add `fpdf2` to your `requirements.txt` to enable PDF download.")
+            st.info("💡 Tip: Add `fpdf2` to your `requirements.txt` to enable PDF download.")
     
     st.divider()
-    st.subheader(" Top 5 Per Setup (Ranked by RL Score)")
+    st.subheader("🎯 Top 5 Per Setup (Ranked by RL Score)")
     
     def _color_setup_r(val):
         return f"background-color:{COLOR_MAP.get(val,'#888')}; color: black; font-weight: bold"
@@ -1002,5 +1052,1177 @@ def render_plotly_chart(full, da, levels):
     
     st.plotly_chart(fig, use_container_width=True)
 
-# Note: The remaining functions (render_analysis, render_performance, render_auto_trade, main) are too long to include in full.
-# They remain UNCHANGED from your original file. Just copy them from your original streamlit_app.py after this point.
+# DEEP ANALYSIS TAB
+def render_analysis():
+    md = st.session_state.get("market_data", {})
+    if not md:
+        st.info("Run the screener first to load market data.")
+        return
+    
+    screening_df = st.session_state.get("screening_df")
+    screening_tickers = set(screening_df["Ticker"].tolist()) if screening_df is not None and not screening_df.empty and "Ticker" in screening_df.columns else set()
+    show_all = st.checkbox("Show all tickers (including non-screened)", value=False)
+    
+    if show_all:
+        all_tickers = sorted(md.keys())
+    else:
+        if not screening_tickers:
+            st.info("No screening results yet. Run the screener first.")
+            return
+        all_tickers = sorted(screening_tickers)
+    
+    ticker = st.selectbox("Select Ticker", all_tickers, key="analysis_ticker")
+    if not ticker:
+        return
+    
+    if not show_all and ticker not in screening_tickers:
+        st.warning(f"'{ticker}' did not pass screening. Enable 'Show all tickers' above for full analysis.")
+    
+    df_stock = md[ticker]
+    if isinstance(df_stock.columns, pd.MultiIndex):
+        df_stock.columns = df_stock.columns.get_level_values(0)
+    
+    adaptive_params = load_adaptive_config()
+    with st.spinner("Generating deep analysis..."):
+        full = calculate_full_indicators(df_stock, adaptive_params)
+        last = full.iloc[-1]
+        stock_regime = determine_stock_regime(full)
+        setup, valid = classify_setup_state(full, stock_regime, adaptive_params)
+        close = last['Close']
+        atr = last['atr_rm']
+        last_date = full.index[-1]
+        now = datetime.now()
+        try:
+            last_date_formatted = last_date.strftime("%A, %d %B %Y")
+            is_today = hasattr(last_date, 'date') and last_date.date() == now.date()
+            price_label = "last price" if is_today else "close"
+        except Exception:
+            last_date_formatted = last_date.strftime("%Y-%m-%d")
+            price_label = "close"
+        
+        setup_color = COLOR_MAP.get(setup, "#888") if valid else "#888"
+        regime_emoji = {"BULL":"🟢","SIDEWAYS":"🟡","BEAR":"🔴"}.get(stock_regime, "⚪")
+        
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 14px; margin-bottom: 0.6rem; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                <h2 style="margin: 0; color:#ECEFF1; font-size: 1.2rem;">Trade Assistant</h2>
+                <span style="background:{setup_color}22; color:{setup_color}; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; border: 1px solid {setup_color}44;"> {setup if valid else 'NO SETUP'} </span>
+                <span style="background: rgba(255,255,255,0.05); color:#B0BEC5; padding: 4px 10px; border-radius: 6px; font-weight: 500; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);"> 📈 {ticker} </span>
+                <span style="background: rgba(255,255,255,0.05); color:#B0BEC5; padding: 4px 10px; border-radius: 6px; font-weight: 500; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);"> 💰 {round_to_tick(close):.0f} ({price_label} {last_date_formatted}) </span>
+                <span style="background: rgba(255,255,255,0.05); color:#B0BEC5; padding: 4px 10px; border-radius: 6px; font-weight: 500; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.08);"> {regime_emoji} {stock_regime} </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if valid:
+            da = generate_deep_analysis(full, setup, close, atr, adaptive_params)
+            timing_data = da['timing']
+            timing_label = timing_data['label']
+            timing_emoji = TIMING_MAP.get(timing_label, ("⚪", ""))[0]
+            timing_color = "#66BB6A" if timing_label == "ENTRY_READY" else "#FFA726" if "WAIT" in timing_label else "#90A4AE"
+            target_price = timing_data.get('target_price')
+            if target_price:
+                timing_display = f"{timing_label.replace('_', ' ').title()} ({target_price:.0f})"
+            else:
+                timing_display = timing_label.replace('_', ' ').title()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color:#78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Entry Zone</div>
+                    <div style="color:#ECEFF1; font-size: 1.5rem; font-weight: 700; font-family:'Inter', monospace;">{round_to_tick(da['entry_zone']['low']):.0f}-{round_to_tick(da['entry_zone']['high']):.0f}</div>
+                    <div style="color:#78909C; font-size: 0.75rem; margin-top: 4px;">{da['entry_zone']['strategy']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col2:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color:#78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Batas Rugi</div>
+                    <div style="color:#EF5350; font-size: 1.5rem; font-weight: 700; font-family: 'Inter', monospace;">{round_to_tick(da['sl_normal']):.0f}</div>
+                    <div style="color:#78909C; font-size: 0.75rem; margin-top: 4px;">Wide: {round_to_tick(da['sl_wide']['price']):.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col3:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color:#78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Timing</div>
+                    <div style="color:{timing_color}; font-size: 1.5rem; font-weight: 700;">{timing_emoji}</div>
+                    <div style="color:{timing_color}; font-size: 0.85rem; font-weight: 600; margin-top: 4px;">{timing_display}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col4:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 20px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                    <div style="color:#78909C; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Target Profit</div>
+                    <div style="color:#66BB6A; font-size: 1.1rem; font-weight: 700; font-family:'Inter', monospace;">{round_to_tick(da['tp_analysis'][0]['price']):.0f}</div>
+                    <div style="color:#78909C; font-size: 0.75rem; margin-top: 4px;">TP2: {round_to_tick(da['tp_analysis'][1]['price']):.0f} | TP3: {round_to_tick(da['tp_analysis'][2]['price']):.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            entry_low, entry_high = da['entry_zone']['low'], da['entry_zone']['high']
+            sl = da['sl_normal']
+            tp1, tp2, tp3 = da['tp_analysis'][0]['price'], da['tp_analysis'][1]['price'], da['tp_analysis'][2]['price']
+            
+            if timing_label == "ENTRY_READY":
+                action_items = [f"Siap masuk! Entry di zona {round_to_tick(entry_low):.0f}-{round_to_tick(entry_high):.0f}", f"Batas rugi di {round_to_tick(sl):.0f}", f"Target profit: {round_to_tick(tp1):.0f} → {round_to_tick(tp2):.0f} → {round_to_tick(tp3):.0f}"]
+                action_color, action_emoji, action_title = "#66BB6A", "✅", "SIAP MASUK"
+            elif "WAIT_PULLBACK" in timing_label:
+                if target_price:
+                    action_items = [f"Tunggu harga turun ke {round_to_tick(target_price):.0f} dulu", f"Setelah sampai, entry di zona {round_to_tick(target_price):.0f}-{round_to_tick(target_price*1.02):.0f}", f"Batas rugi di {round_to_tick(sl):.0f}"]
+                else:
+                    action_items = ["Tunggu harga turun dulu sebelum masuk", f"Entry di zona {round_to_tick(entry_low):.0f}-{round_to_tick(entry_high):.0f}", f"Batas rugi di {round_to_tick(sl):.0f}"]
+                action_color, action_emoji, action_title = "#FFA726", "⏳", "TUNGGU PULLBACK"
+            elif "WAIT_RETEST" in timing_label:
+                if target_price:
+                    action_items = [f"Tunggu harga kembali ke {round_to_tick(target_price):.0f}", f"Setelah test ulang, entry di zona {round_to_tick(target_price):.0f}-{round_to_tick(target_price*1.02):.0f}", f"Batas rugi di {round_to_tick(sl):.0f}"]
+                else:
+                    action_items = ["Tunggu harga test ulang level kunci", f"Entry di zona {round_to_tick(entry_low):.0f}-{round_to_tick(entry_high):.0f}", f"Batas rugi di {round_to_tick(sl):.0f}"]
+                action_color, action_emoji, action_title = "#FFA726", "⏳", "TUNGGU RETEST"
+            elif "WAIT_VOLUME" in timing_label:
+                action_items = ["Tunggu volume naik dulu sebelum masuk", f"Entry di zona {round_to_tick(entry_low):.0f}-{round_to_tick(entry_high):.0f} setelah volume konfirmasi", f"Batas rugi di {round_to_tick(sl):.0f}"]
+                action_color, action_emoji, action_title = "#FFA726", "⏳", "TUNGGU VOLUME"
+            elif "WAIT_PRICE" in timing_label:
+                if target_price:
+                    action_items = [f"Tunggu harga naik di atas {target_price:.0f}", f"Entry di zona {entry_low:.0f}-{entry_high:.0f} setelah breakout", f"Batas rugi di {sl:.0f}"]
+                else:
+                    action_items = ["Tunggu harga bergerak lebih tinggi", f"Entry di zona {entry_low:.0f}-{entry_high:.0f}", f"Batas rugi di {sl:.0f}"]
+                action_color, action_emoji, action_title = "#FFA726", "⏳", "TUNGGU BREAKOUT"
+            else:
+                action_items = ["Belum ada sinyal entry yang jelas", "Tunggu konfirmasi lebih lanjut"]
+                action_color, action_emoji, action_title = "#90A4AE", "⏸", "TUNGGU"
+            
+            action_html = "".join(f'<li style="margin-bottom: 6px;">{item}</li>' for item in action_items)
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid {action_color}44; border-radius: 14px; padding: 20px; margin: 1rem 0; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <span style="font-size: 1.2rem;">{action_emoji}</span>
+                    <span style="color:{action_color}; font-size: 1rem; font-weight: 700;">Langkah Selanjutnya</span>
+                    <span style="background:{action_color}22; color:{action_color}; padding: 2px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; border: 1px solid {action_color}44;"> {action_title} </span>
+                </div>
+                <ul style="color:#B0BEC5; margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6;"> {action_html} </ul>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.divider()
+            patterns, meta = detect_patterns(df_stock)
+            pattern_info = get_pattern_score(patterns)
+            mta = multi_timeframe_analysis(ticker)
+            vp = volume_profile_analysis(df_stock)
+            tl = trendline_analysis(df_stock)
+            # UPDATED: Uses uncached load_jkse
+            jkse = load_jkse()
+            rs = risk_scenario_analysis(df_stock, jkse) if jkse is not None else {"beta": None, "scenarios": []}
+            # UPDATED: Uses uncached load_fundamental
+            fundamental_df = load_fundamental()
+            fund_data = {}
+            if ticker in fundamental_df.index:
+                fund_data = fundamental_df.loc[ticker].to_dict()
+            
+            interp = generate_interpretation(full, setup, da, mta, vp, tl, rs, patterns, meta, fund_data)
+            
+            st.markdown("""
+            <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 12px; margin-bottom: 0.5rem; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <h3 style="color:#ECEFF1; margin: 0 0 8px 0; font-size: 0.95rem;">📊 Analisa Signal</h3>
+            """, unsafe_allow_html=True)
+            for line in interp.split("\n"):
+                if line.startswith("KONDISI HARGA:"): st.markdown(f"**📈 {line}**")
+                elif line.startswith("VOLUME:"): st.markdown(f"**📊 {line}**")
+                elif line.startswith("POLA:"): st.markdown(f"**🕯 {line}**")
+                elif line.startswith("FUNDAMENTAL:"): st.markdown(f"**💼 {line}**")
+                elif line.startswith("RISIKO:"): st.markdown(f"**⚠ {line}**")
+                elif line.startswith("LANGKAH SELANJUTNYA:"): st.markdown(f"**✅ {line}**")
+                elif line.startswith("  •"): st.markdown(f"{line}")
+                elif line.strip(): st.markdown(line)
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.divider()
+            tab_names = ["📈 Chart", "🕯 Candlestick", "📊 Multi-Timeframe", "📦 Volume Profile", "📐 Trendlines", "⚠ Risk Scenario"]
+            tabs = st.tabs(tab_names)
+            
+            with tabs[0]:
+                if valid: render_plotly_chart(full, da, da['levels'])
+                else: st.info("No active setup for chart display.")
+            with tabs[1]:
+                if patterns:
+                    pat_df = pd.DataFrame(patterns, columns=["Date", "Pattern", "Confidence"])
+                    st.dataframe(pat_df, use_container_width=True, hide_index=True)
+                    if meta["bars_since_last"] > 3:
+                        st.warning(f"Last pattern: **{patterns[-1][0]}** on **{meta['last_pattern_date']}** ({meta['bars_since_last']} trading days ago). The last {meta['bars_since_last']} bars did not form any detectable patterns.")
+                    else:
+                        st.info("No significant patterns detected in the last 7 bars.")
+                else:
+                    st.info("No significant patterns detected in the last 7 bars.")
+            with tabs[2]:
+                wk = mta.get("weekly", {})
+                if wk.get("trend"):
+                    st.json(wk)
+                else:
+                    st.warning("Weekly data unavailable.")
+                st_count = int(last.get('st_bullish_count', 0))
+                daily_trend = "BULLISH" if st_count >= 2 else "BEARISH" if st_count == 0 else "SIDEWAYS"
+                st.metric("Daily Trend", f"{daily_trend} ({st_count}/3 ST)")
+                if wk.get("trend"):
+                    align = "ALIGNED" if wk["trend"] == daily_trend else "CONFLICT"
+                    st.metric("Alignment", align)
+            with tabs[3]:
+                st.metric("Current Zone", vp.get("current_zone", "N/A"))
+                if vp.get("hvns"):
+                    hv = pd.DataFrame(vp["hvns"])
+                    st.dataframe(hv, use_container_width=True, hide_index=True)
+            with tabs[4]:
+                c1, c2 = st.columns(2)
+                with c1:
+                    if tl.get("uptrend"):
+                        st.metric("Uptrend", f"Active: {tl['uptrend']['active']}")
+                        st.caption(f"slope {tl['uptrend']['slope']}")
+                    else:
+                        st.info("No uptrend detected")
+                with c2:
+                    if tl.get("downtrend"):
+                        d = tl["downtrend"]
+                        status = "Broken ✓" if d.get("broken") else "Active"
+                        st.metric("Downtrend", status)
+                        st.caption(f"slope {d['slope']}")
+                    else:
+                        st.info("No downtrend detected")
+            with tabs[5]:
+                if rs.get("beta"):
+                    st.metric("Beta vs IHSG", rs["beta"])
+                    if rs.get("scenarios"):
+                        sc = pd.DataFrame(rs["scenarios"])
+                        st.dataframe(sc, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("Beta: insufficient data")
+
+# PERFORMANCE TAB
+def render_performance():
+    tab_bt, tab_cal, tab_port, tab_jrn = st.tabs(["📊 Backtest", "🎯 Calibration", "💰 Portfolio", "📋 Journal"])
+    with tab_bt: render_backtest()
+    with tab_cal: render_calibration()
+    with tab_port: render_portfolio()
+    with tab_jrn: render_journal()
+
+def render_backtest():
+    st.subheader("📊 Historical Backtest")
+    col1, col2 = st.columns(2)
+    with col1:
+        mode = st.radio("Backtest Mode", ["Quick (~30s)", "Full (~5-10min)"], horizontal=True, key="bt_mode")
+        freq = "5B" if "Quick" in mode else "B"
+    with col2:
+        st.caption("Quick: samples every 5 trading days")
+        st.caption("Full: runs every trading day")
+    
+    col1, col2 = st.columns(2)
+    start_date = col1.date_input("Start Date", value=datetime.now() - timedelta(days=365), key="bt_start")
+    end_date = col2.date_input("End Date", value=datetime.now(), key="bt_end")
+    
+    col1, col2, col3 = st.columns(3)
+    capital = col1.number_input("Capital (Rp)", value=INITIAL_CAPITAL, step=10_000_000, key="bt_capital")
+    pos_size = col2.number_input("Position Size (Rp)", value=POSITION_SIZE, step=1_000_000, key="bt_pos")
+    max_pos = col3.number_input("Max Positions", value=MAX_POSITIONS, min_value=1, max_value=20, key="bt_max")
+    
+    market_data = st.session_state.get("market_data", {})
+    all_tickers = sorted(market_data.keys()) if market_data else TICKERS
+    selected_tickers = st.multiselect("Tickers to Backtest", options=all_tickers, default=[], key="bt_tickers", help="Leave empty to backtest all tickers")
+    
+    if st.button("🚀 Run Backtest", type="primary", key="bt_run"):
+        _run_backtest(start_date, end_date, capital, pos_size, max_pos, freq, selected_tickers)
+
+def _run_backtest(start_date, end_date, capital, pos_size, max_pos, freq, tickers=None):
+    init_db()
+    clear_backtest_data()
+    LOOKBACK_DAYS = 300
+    if isinstance(start_date, datetime):
+        fetch_start = start_date - timedelta(days=LOOKBACK_DAYS)
+    else:
+        fetch_start = datetime.combine(start_date, datetime.min.time()) - timedelta(days=LOOKBACK_DAYS)
+    if isinstance(end_date, datetime):
+        fetch_end = end_date
+    else:
+        fetch_end = datetime.combine(end_date, datetime.min.time())
+    
+    with st.spinner(f"Loading data from {fetch_start.date()} to {fetch_end.date()}..."):
+        # UPDATED: Uses uncached load_market_data
+        market_data = load_market_data(start_date=fetch_start.strftime("%Y-%m-%d"), end_date=fetch_end.strftime("%Y-%m-%d"))
+        if not market_data:
+            st.warning("No market data loaded.")
+            return
+        if tickers:
+            market_data = {k: v for k, v in market_data.items() if k in tickers}
+        
+        signal_dates = pd.bdate_range(start=start_date, end=end_date, freq=freq)
+        total_days = len(signal_dates)
+        progress = st.progress(0, text="Starting backtest...")
+        positions, cash, equity_curve, snapshot_dates, trades_log = {}, capital, [], [], []
+        
+        for i, sig_date in enumerate(signal_dates):
+            progress.progress(i / total_days, text=f"Processing {sig_date.date()} ({i+1}/{total_days})...")
+            for ticker, pos in list(positions.items()):
+                if ticker not in market_data: continue
+                df = market_data[ticker]
+                future_data = df[df.index > pos["entry_date"]]
+                if future_data.empty: continue
+                today_data = future_data[future_data.index <= sig_date]
+                if today_data.empty: continue
+                last_row = today_data.iloc[-1]
+                high, low, close = last_row["High"], last_row["Low"], last_row["Close"]
+                remaining = pos.get("remaining_shares", pos["shares"])
+                original = pos.get("original_cost", pos["cost"])
+                entry_p = pos["entry_price"]
+                ap = load_adaptive_config()
+                tp1_pct = ap.get("tp1_pct", 60) / 100.0
+                tp2_pct = ap.get("tp2_pct", 25) / 100.0
+                tp3_pct = ap.get("tp3_pct", 15) / 100.0
+                
+                if pos["sl"] and low <= pos["sl"]:
+                    shares = remaining
+                    proceeds = shares * pos["sl"]
+                    cost_basis = (shares / pos["shares"]) * original
+                    pnl = proceeds - cost_basis
+                    cash += proceeds
+                    trade_data = {"setup": pos.get("setup", "UNKNOWN"), "prediction_id": pos.get("prediction_id"), "ticker": ticker,
+                                  "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": entry_p,
+                                  "exit_date": sig_date.strftime("%Y-%m-%d"), "exit_price": round(pos["sl"], 2), "exit_reason": "SL",
+                                  "return_pct": round((pnl / cost_basis) * 100, 2), "return_abs": round(pnl, 2),
+                                  "days_held": (sig_date - pos["entry_date"]).days, "hit_tp1": 1 if pos.get("tp1_hit") else 0,
+                                  "hit_tp2": 1 if pos.get("tp2_hit") else 0, "hit_tp3": 0, "hit_sl": 1, "max_favorable": 0, "max_adverse": 0, "status": "CLOSED"}
+                    trades_log.append(trade_data)
+                    log_trade_result(trade_data)
+                    del positions[ticker]
+                    continue
+                
+                if pos.get("tp1") and high >= pos["tp1"] and not pos.get("tp1_hit"):
+                    pos["tp1_hit"] = True
+                    pos["sl"] = pos["entry_price"]
+                    sell_qty = int(pos["shares"] * tp1_pct)
+                    if sell_qty > 0 and remaining >= sell_qty:
+                        proceeds = sell_qty * pos["tp1"]
+                        cost_basis = (sell_qty / pos["shares"]) * original
+                        pnl = proceeds - cost_basis
+                        cash += proceeds
+                        pos["remaining_shares"] = remaining - sell_qty
+                        trade_data = {"setup": pos.get("setup", "UNKNOWN"), "prediction_id": pos.get("prediction_id"), "ticker": ticker,
+                                      "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": entry_p,
+                                      "exit_date": sig_date.strftime("%Y-%m-%d"), "exit_price": round(pos["tp1"], 2), "exit_reason": "TP1",
+                                      "return_pct": round((pnl / cost_basis) * 100, 2), "return_abs": round(pnl, 2),
+                                      "days_held": (sig_date - pos["entry_date"]).days, "hit_tp1": 1, "hit_tp2": 0, "hit_tp3": 0, "hit_sl": 0, "max_favorable": 0, "max_adverse": 0, "status": "CLOSED"}
+                        trades_log.append(trade_data)
+                        log_trade_result(trade_data)
+                
+                if pos.get("tp2") and high >= pos["tp2"] and pos.get("tp1_hit") and not pos.get("tp2_hit"):
+                    pos["tp2_hit"] = True
+                    pos["sl"] = pos["tp2"]
+                    remaining = pos.get("remaining_shares", pos["shares"])
+                    sell_qty = int(pos["shares"] * tp2_pct)
+                    if sell_qty > 0 and remaining >= sell_qty:
+                        proceeds = sell_qty * pos["tp2"]
+                        cost_basis = (sell_qty / pos["shares"]) * original
+                        pnl = proceeds - cost_basis
+                        cash += proceeds
+                        pos["remaining_shares"] = remaining - sell_qty
+                        trade_data = {"setup": pos.get("setup", "UNKNOWN"), "prediction_id": pos.get("prediction_id"), "ticker": ticker,
+                                      "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": entry_p,
+                                      "exit_date": sig_date.strftime("%Y-%m-%d"), "exit_price": round(pos["tp2"], 2), "exit_reason": "TP2",
+                                      "return_pct": round((pnl / cost_basis) * 100, 2), "return_abs": round(pnl, 2),
+                                      "days_held": (sig_date - pos["entry_date"]).days, "hit_tp1": 1, "hit_tp2": 1, "hit_tp3": 0, "hit_sl": 0, "max_favorable": 0, "max_adverse": 0, "status": "CLOSED"}
+                        trades_log.append(trade_data)
+                        log_trade_result(trade_data)
+                
+                remaining = pos.get("remaining_shares", pos["shares"])
+                if pos.get("tp3") and high >= pos["tp3"] and pos.get("tp2_hit") and remaining > 0:
+                    proceeds = remaining * pos["tp3"]
+                    cost_basis = (remaining / pos["shares"]) * original
+                    pnl = proceeds - cost_basis
+                    cash += proceeds
+                    trade_data = {"setup": pos.get("setup", "UNKNOWN"), "prediction_id": pos.get("prediction_id"), "ticker": ticker,
+                                  "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": entry_p,
+                                  "exit_date": sig_date.strftime("%Y-%m-%d"), "exit_price": round(pos["tp3"], 2), "exit_reason": "TP3",
+                                  "return_pct": round((pnl / cost_basis) * 100, 2), "return_abs": round(pnl, 2),
+                                  "days_held": (sig_date - pos["entry_date"]).days, "hit_tp1": 1, "hit_tp2": 1, "hit_tp3": 1, "hit_sl": 0, "max_favorable": 0, "max_adverse": 0, "status": "CLOSED"}
+                    trades_log.append(trade_data)
+                    log_trade_result(trade_data)
+                    del positions[ticker]
+                    continue
+                
+                days_held = (sig_date - pos["entry_date"]).days
+                if days_held > MC_HORIZON:
+                    remaining = pos.get("remaining_shares", pos["shares"])
+                    original = pos.get("original_cost", pos["cost"])
+                    entry_p = pos["entry_price"]
+                    proceeds = remaining * close
+                    cost_basis = (remaining / pos["shares"]) * original
+                    pnl = proceeds - cost_basis
+                    cash += proceeds
+                    trade_data = {"setup": pos.get("setup", "UNKNOWN"), "prediction_id": pos.get("prediction_id"), "ticker": ticker,
+                                  "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": entry_p,
+                                  "exit_date": sig_date.strftime("%Y-%m-%d"), "exit_price": round(close, 2), "exit_reason": "TIMEOUT",
+                                  "return_pct": round((pnl / cost_basis) * 100, 2), "return_abs": round(pnl, 2), "days_held": days_held,
+                                  "hit_tp1": 1 if pos.get("tp1_hit") else 0, "hit_tp2": 1 if pos.get("tp2_hit") else 0, "hit_tp3": 0, "hit_sl": 0, "max_favorable": 0, "max_adverse": 0, "status": "CLOSED"}
+                    trades_log.append(trade_data)
+                    log_trade_result(trade_data)
+                    del positions[ticker]
+            
+            results = run_screening_at_date(market_data, sig_date, None)
+            for r in results:
+                if r.get("timing") != "ENTRY_READY": continue
+                ticker = r["ticker"]
+                if ticker in positions: continue
+                if len(positions) >= max_pos: break
+                if cash < pos_size: break
+                pred_id = log_prediction(r)
+                entry_price = r["price_at_signal"]
+                shares = int(pos_size / entry_price)
+                if shares <= 0: continue
+                cost = shares * entry_price
+                if cost > cash: continue
+                cash -= cost
+                positions[ticker] = {"shares": shares, "remaining_shares": shares, "original_cost": cost, "entry_price": entry_price,
+                                     "cost": cost, "entry_date": sig_date, "setup": r["setup"], "sl": r["stop_loss"],
+                                     "tp1": r.get("tp1"), "tp2": r.get("tp2"), "tp3": r.get("tp3"), "prediction_id": pred_id, "tp1_hit": False, "tp2_hit": False}
+            
+            total_value = cash
+            for ticker, pos in positions.items():
+                if ticker in market_data:
+                    df = market_data[ticker]
+                    recent = df[df.index <= sig_date]
+                    if not recent.empty:
+                        remaining = pos.get("remaining_shares", pos["shares"])
+                        total_value += remaining * recent["Close"].iloc[-1]
+                    else:
+                        total_value += pos["cost"]
+                else:
+                    total_value += pos["cost"]
+            equity_curve.append(total_value)
+            snapshot_dates.append(sig_date)
+        
+        for ticker, pos in list(positions.items()):
+            if ticker in market_data:
+                df = market_data[ticker]
+                last_close = df["Close"].iloc[-1]
+                remaining = pos.get("remaining_shares", pos["shares"])
+                original = pos.get("original_cost", pos["cost"])
+                entry_p = pos["entry_price"]
+                proceeds = remaining * last_close
+                cost_basis = (remaining / pos["shares"]) * original
+                pnl = proceeds - cost_basis
+                cash += proceeds
+                trade_data = {"setup": pos.get("setup", "UNKNOWN"), "prediction_id": pos.get("prediction_id"), "ticker": ticker,
+                              "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": entry_p,
+                              "exit_date": end_date.strftime("%Y-%m-%d"), "exit_price": round(last_close, 2), "exit_reason": "END",
+                              "return_pct": round((pnl / cost_basis) * 100, 2), "return_abs": round(pnl, 2),
+                              "days_held": (end_date - pos["entry_date"].date()).days, "hit_tp1": 1 if pos.get("tp1_hit") else 0,
+                              "hit_tp2": 1 if pos.get("tp2_hit") else 0, "hit_tp3": 0, "hit_sl": 0, "max_favorable": 0, "max_adverse": 0, "status": "CLOSED"}
+                trades_log.append(trade_data)
+                log_trade_result(trade_data)
+        
+        progress.progress(1.0, text="Backtest complete!")
+        if trades_log:
+            report = full_report(trades_log, equity_curve)
+            _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, capital)
+        else:
+            st.warning("No trades generated during backtest period.")
+
+def _display_backtest_results(report, equity_curve, snapshot_dates, trades_log, capital):
+    st.divider()
+    total_ret = (equity_curve[-1] / capital - 1) * 100 if equity_curve else 0
+    ret_color = "#66BB6A" if total_ret > 0 else "#EF5350"
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 28px; margin-bottom: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <h2 style="margin: 0; color:#ECEFF1; font-size: 1.4rem;">📈 Backtest Results</h2>
+            <span style="background:{ret_color}22; color:{ret_color}; padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; border: 1px solid {ret_color}44;"> Total Return: {total_ret:+.2f}% </span>
+            <span style="background: rgba(255,255,255,0.05); color:#B0BEC5; padding: 6px 14px; border-radius: 8px; font-weight: 500; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.08);"> {report.get('total_trades', 0)} trades </span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Win Rate", f"{report.get('win_rate', 0):.1%}")
+    col2.metric("Avg Return", f"{report.get('avg_return_pct', 0):+.2f}%")
+    col3.metric("Sharpe", f"{report.get('sharpe_ratio', 0):.2f}")
+    col4.metric("Max DD", f"{report.get('max_drawdown', 0):.2%}")
+    col5.metric("Trades", f"{report.get('total_trades', 0)}")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Profit Factor", f"{report.get('profit_factor', 0):.2f}")
+    col2.metric("Sortino", f"{report.get('sortino_ratio', 0):.2f}")
+    col3.metric("Total Return", f"{total_ret:+.2f}%")
+    col4.metric("Calmar", f"{report.get('calmar_ratio', 0):.2f}")
+    
+    st.divider()
+    st.subheader("📊 Equity Curve")
+    eq_df = pd.DataFrame({"Date": snapshot_dates[:len(equity_curve)], "Portfolio (Rp Juta)": [v / 1_000_000 for v in equity_curve]})
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=eq_df["Date"], y=eq_df["Portfolio (Rp Juta)"], mode="lines", name="Portfolio", line=dict(color="#42A5F5", width=2.5), fill="tozeroy", fillcolor="rgba(66, 165, 245, 0.1)"))
+    fig.update_layout(height=380, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Value (Rp Juta)", xaxis_title="", font_color="#B0BEC5", font_family="Inter", margin=dict(l=50, r=20, t=20, b=40), yaxis=dict(gridcolor="rgba(255,255,255,0.05)"), xaxis=dict(gridcolor="rgba(255,255,255,0.05)"))
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider()
+    st.subheader("📊 Setup Breakdown")
+    sb = report.get("setup_breakdown", {})
+    if sb:
+        sb_df = pd.DataFrame([{"Setup": k, "Trades": v["count"], "Win Rate": v["win_rate"], "Avg Return": v["avg_return"], "Profit Factor": v["profit_factor"], "Reliable": "✅" if v.get("reliable", False) else "⚠<3"} for k, v in sb.items()])
+        fig = px.bar(sb_df, x="Setup", y="Win Rate", color="Setup", color_discrete_map=COLOR_MAP, text="Win Rate")
+        fig.update_traces(texttemplate="%{text:.1%}", textposition="outside")
+        fig.update_layout(height=320, showlegend=False, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_tickformat=".0%", font_color="#B0BEC5", font_family="Inter", margin=dict(l=50, r=20, t=20, b=40), yaxis=dict(gridcolor="rgba(255,255,255,0.05)"))
+        st.plotly_chart(fig, use_container_width=True)
+    
+    er = report.get("exit_reason_breakdown", {})
+    if er:
+        st.subheader("🚪 Exit Reason Breakdown")
+        er_df = pd.DataFrame([{"Reason": k, "Count": v["count"], "Avg Return": v["avg_return"], "Avg Days": v["avg_days_held"]} for k, v in er.items()])
+        total = er_df["Count"].sum()
+        er_df["%"] = (er_df["Count"] / total * 100).round(1)
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.dataframe(er_df[["Reason", "Count", "%", "Avg Return", "Avg Days"]], use_container_width=True, hide_index=True, column_config={"Avg Return": st.column_config.NumberColumn("Avg Return", format="%.2f%%"), "Avg Days": st.column_config.NumberColumn("Avg Days", format="%.1f"), "%": st.column_config.NumberColumn("%", format="%.1f%%")})
+        with c2:
+            colors = {"TP1": "#2ecc71", "TP2": "#27ae60", "TP3": "#1e8449", "SL": "#e74c3c", "TIMEOUT": "#f39c12"}
+            fig_er = px.pie(er_df, values="Count", names="Reason", color="Reason", color_discrete_map=colors)
+            fig_er.update_traces(textinfo="percent+label")
+            fig_er.update_layout(height=280, showlegend=False, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=10, b=10))
+            st.plotly_chart(fig_er, use_container_width=True)
+    
+    st.divider()
+    st.subheader("📋 Trade Log")
+    trades_df = pd.DataFrame(trades_log)
+    if not trades_df.empty:
+        st.dataframe(trades_df, use_container_width=True, hide_index=True, column_config={"return_pct": st.column_config.NumberColumn("Return%", format="%.2f"), "entry_price": st.column_config.NumberColumn("Entry", format="%.2f"), "exit_price": st.column_config.NumberColumn("Exit", format="%.2f")})
+        csv = trades_df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Trade Log", csv, "backtest_trades.csv", "text/csv")
+    
+    st.markdown("""
+    <div class="dyor-disclaimer" style="text-align:center; padding: 1rem; color:#90A4AE;"> ⚠ Think First. Trade Second. DYOR - Do Your Own Research </div>
+    """, unsafe_allow_html=True)
+
+def render_calibration():
+    st.subheader("🎯 Monte Carlo Calibration")
+    init_db()
+    trades = get_trade_results()
+    predictions = get_all_predictions(filters={"status": "CLOSED"})
+    if not trades:
+        st.info("No closed trades available. Run a backtest first.")
+        return
+    
+    pred_map = {p["id"]: p for p in predictions}
+    bins_data = {}
+    for trade in trades:
+        pred_id = trade.get("prediction_id")
+        if pred_id not in pred_map: continue
+        pred = pred_map[pred_id]
+        prob_str = pred.get("prob_tp1")
+        if prob_str is None: continue
+        try:
+            prob = float(str(prob_str).replace("%", "").strip())
+        except (ValueError, TypeError):
+            continue
+        actual = 1 if trade.get("hit_tp1") else 0
+        bin_idx = min(int(prob / 10), 9)
+        bin_label = f"{bin_idx*10}-{(bin_idx+1)*10}%"
+        if bin_label not in bins_data:
+            bins_data[bin_label] = {"predicted": [], "actual": []}
+        bins_data[bin_label]["predicted"].append(prob)
+        bins_data[bin_label]["actual"].append(actual)
+    
+    if not bins_data:
+        st.warning("No probability data available for calibration analysis.")
+        return
+    
+    bins_result = {}
+    for label in sorted(bins_data.keys()):
+        data = bins_data[label]
+        avg_pred = np.mean(data["predicted"])
+        actual_rate = np.mean(data["actual"]) * 100
+        count = len(data["actual"])
+        bins_result[label] = {"avg_predicted": round(avg_pred, 2), "actual_hit_rate": round(actual_rate, 2), "count": count, "gap": round(abs(avg_pred - actual_rate), 2)}
+    
+    col1, col2, col3 = st.columns(3)
+    bs = brier_score(trades, predictions)
+    ece = expected_calibration_error(bins_result)
+    mce = maximum_calibration_error(bins_result)
+    col1.metric("Brier Score", f"{bs:.4f}" if bs else "N/A", help="Lower is better. <0.1 = Excellent, <0.2 = Good")
+    col2.metric("Calibration Error (ECE)", f"{ece:.2f}%" if ece else "N/A", help="Average gap between predicted and actual")
+    col3.metric("Max Calibration Error", f"{mce:.1f}%" if mce else "N/A")
+    
+    st.divider()
+    st.subheader("Reliability Diagram")
+    bin_labels = sorted(bins_data.keys())
+    predicted_vals = [bins_result[b]["avg_predicted"] for b in bin_labels]
+    actual_vals = [bins_result[b]["actual_hit_rate"] for b in bin_labels]
+    counts = [bins_result[b]["count"] for b in bin_labels]
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[0, 100], y=[0, 100], mode="lines", name="Perfect Calibration", line=dict(color="gray", dash="dash", width=1)))
+    fig.add_trace(go.Scatter(x=predicted_vals, y=actual_vals, mode="markers+text", name="Calibration", marker=dict(size=[max(8, c * 2) for c in counts], color=counts, colorscale="Viridis", showscale=True, colorbar=dict(title="Count")), text=bin_labels, textposition="top center", textfont=dict(size=9)))
+    fig.update_layout(height=400, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis_title="Predicted Probability (%)", yaxis_title="Actual Hit Rate (%)", margin=dict(l=50, r=20, t=30, b=40))
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider()
+    st.subheader("Calibration Bins")
+    bins_df = pd.DataFrame([{"Bin": k, "Predicted": f"{v['avg_predicted']:.1f}%", "Actual": f"{v['actual_hit_rate']:.1f}%", "Gap": f"{v['gap']:.1f}%", "Count": v["count"]} for k, v in bins_result.items()])
+    st.dataframe(bins_df, use_container_width=True, hide_index=True)
+    
+    st.markdown("""
+    <div class="dyor-disclaimer" style="text-align:center; padding: 1rem; color:#90A4AE;"> ⚠ Think First. Trade Second. DYOR - Do Your Own Research </div>
+    """, unsafe_allow_html=True)
+
+def render_portfolio():
+    st.subheader("💰 Portfolio Simulation")
+    init_db()
+    col1, col2 = st.columns(2)
+    capital = col1.number_input("Initial Capital (Rp)", value=INITIAL_CAPITAL, step=10_000_000, key="port_capital")
+    pos_size = col2.number_input("Position Size (Rp)", value=POSITION_SIZE, step=1_000_000, key="port_pos")
+    if st.button("🚀 Run Portfolio Simulation", type="primary", key="port_run"):
+        _run_portfolio_simulation(capital, pos_size)
+
+def _run_portfolio_simulation(capital, pos_size):
+    market_data = st.session_state.get("market_data")
+    if not market_data:
+        st.warning("Please run the screener first to load market data.")
+        return
+    
+    pending = get_all_predictions(filters={"status": "PENDING"})
+    if not pending:
+        st.info("No pending predictions. Run a backtest first to generate predictions.")
+        return
+    
+    pending_by_date = {}
+    for p in pending:
+        date_str = p["screen_date"][:10]
+        if date_str not in pending_by_date:
+            pending_by_date[date_str] = []
+        pending_by_date[date_str].append(p)
+    
+    positions, cash, equity_curve, snapshot_dates, trades_log = {}, capital, [], [], []
+    all_dates = sorted(set(p["screen_date"][:10] for p in pending))
+    progress = st.progress(0, text="Simulating portfolio...")
+    
+    for i, date_str in enumerate(all_dates):
+        progress.progress(i / len(all_dates), text=f"Processing {date_str}...")
+        sig_date = pd.Timestamp(date_str)
+        for ticker in list(positions.keys()):
+            if ticker not in market_data: continue
+            pos = positions[ticker]
+            df = market_data[ticker]
+            future_data = df[df.index > pos["entry_date"]]
+            if future_data.empty: continue
+            today_data = future_data[future_data.index <= sig_date]
+            if today_data.empty: continue
+            last_row = today_data.iloc[-1]
+            high, low, close = last_row["High"], last_row["Low"], last_row["Close"]
+            
+            if pos["sl"] and low <= pos["sl"]:
+                shares = pos["shares"]
+                proceeds = shares * pos["sl"]
+                pnl = proceeds - pos["cost"]
+                cash += proceeds
+                trades_log.append({"ticker": ticker, "setup": pos["setup"], "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": pos["entry_price"], "exit_date": date_str, "exit_price": round(pos["sl"], 2), "exit_reason": "SL", "return_pct": round((pnl / pos["cost"]) * 100, 2), "days_held": (sig_date - pos["entry_date"]).days})
+                del positions[ticker]
+                continue
+            
+            if pos.get("tp1") and high >= pos["tp1"] and not pos.get("tp1_hit"):
+                pos["tp1_hit"] = True
+                pos["sl"] = pos["entry_price"]
+            if pos.get("tp2") and high >= pos["tp2"] and pos.get("tp1_hit") and not pos.get("tp2_hit"):
+                pos["tp2_hit"] = True
+                pos["sl"] = pos["tp2"]
+            if pos.get("tp3") and high >= pos["tp3"] and pos.get("tp2_hit"):
+                shares = pos["shares"]
+                proceeds = shares * pos["tp3"]
+                pnl = proceeds - pos["cost"]
+                cash += proceeds
+                trades_log.append({"ticker": ticker, "setup": pos["setup"], "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": pos["entry_price"], "exit_date": date_str, "exit_price": round(pos["tp3"], 2), "exit_reason": "TP3", "return_pct": round((pnl / pos["cost"]) * 100, 2), "days_held": (sig_date - pos["entry_date"]).days})
+                del positions[ticker]
+                continue
+            
+            days_held = (sig_date - pos["entry_date"]).days
+            if days_held > MC_HORIZON:
+                shares = pos["shares"]
+                proceeds = shares * close
+                pnl = proceeds - pos["cost"]
+                cash += proceeds
+                trades_log.append({"ticker": ticker, "setup": pos["setup"], "entry_date": pos["entry_date"].strftime("%Y-%m-%d"), "entry_price": pos["entry_price"], "exit_date": date_str, "exit_price": round(close, 2), "exit_reason": "TIMEOUT", "return_pct": round((pnl / pos["cost"]) * 100, 2), "days_held": days_held})
+                del positions[ticker]
+        
+        for pred in pending_by_date.get(date_str, []):
+            ticker = pred["ticker"]
+            if ticker in positions: continue
+            if len(positions) >= MAX_POSITIONS: break
+            if cash < pos_size: break
+            entry_price = pred["price_at_signal"]
+            shares = int(pos_size / entry_price)
+            if shares <= 0: continue
+            cost = shares * entry_price
+            if cost > cash: break
+            cash -= cost
+            positions[ticker] = {"shares": shares, "entry_price": entry_price, "cost": cost, "entry_date": sig_date, "setup": pred["setup"], "sl": pred.get("stop_loss"), "tp1": pred.get("tp1"), "tp2": pred.get("tp2"), "tp3": pred.get("tp3"), "tp1_hit": False, "tp2_hit": False}
+        
+        total_value = cash
+        for ticker, pos in positions.items():
+            if ticker in market_data:
+                df = market_data[ticker]
+                recent = df[df.index <= sig_date]
+                if not recent.empty:
+                    total_value += pos["shares"] * recent["Close"].iloc[-1]
+                else:
+                    total_value += pos["cost"]
+            else:
+                total_value += pos["cost"]
+        equity_curve.append(total_value)
+        snapshot_dates.append(sig_date)
+    
+    progress.progress(1.0, text="Portfolio simulation complete!")
+    if trades_log:
+        report = full_report(trades_log, equity_curve)
+        _display_portfolio_results(report, equity_curve, snapshot_dates, trades_log, capital)
+    else:
+        st.warning("No trades generated during simulation period.")
+
+def _display_portfolio_results(report, equity_curve, snapshot_dates, trades_log, capital):
+    st.divider()
+    st.subheader("📈 Portfolio Results")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Win Rate", f"{report.get('win_rate', 0):.1%}")
+    col2.metric("Total Return", f"{(equity_curve[-1] / capital - 1) * 100:+.2f}%")
+    col3.metric("Sharpe", f"{report.get('sharpe_ratio', 0):.2f}")
+    col4.metric("Max DD", f"{report.get('max_drawdown', 0):.2%}")
+    col5.metric("Trades", f"{report.get('total_trades', 0)}")
+    
+    st.divider()
+    st.subheader("📊 Equity Curve vs IHSG")
+    # UPDATED: Uses uncached load_jkse
+    jkse = load_jkse()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=snapshot_dates[:len(equity_curve)], y=[v / 1_000_000 for v in equity_curve], mode="lines", name="Portfolio", line=dict(color="#42A5F5", width=2)))
+    if jkse is not None:
+        jkse_slice = jkse[jkse.index >= snapshot_dates[0]]
+        jkse_slice = jkse_slice[jkse_slice.index <= snapshot_dates[-1]]
+        if not jkse_slice.empty:
+            jkse_norm = jkse_slice["Close"] / jkse_slice["Close"].iloc[0] * capital
+            fig.add_trace(go.Scatter(x=jkse_slice.index, y=jkse_norm / 1_000_000, mode="lines", name="IHSG", line=dict(color="#FFA726", width=1.5, dash="dash")))
+    fig.update_layout(height=400, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Value (Rp Juta)", xaxis_title="Date", margin=dict(l=50, r=20, t=30, b=40))
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider()
+    st.subheader("📉 Drawdown")
+    equity_arr = np.array(equity_curve)
+    peaks = np.maximum.accumulate(equity_arr)
+    drawdowns = (peaks - equity_arr) / peaks * 100
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=snapshot_dates[:len(drawdowns)], y=-drawdowns, fill="tozeroy", name="Drawdown", line=dict(color="#EF5350", width=1)))
+    fig.update_layout(height=250, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Drawdown (%)", margin=dict(l=50, r=20, t=30, b=40))
+    st.plotly_chart(fig, use_container_width=True)
+    
+    er = report.get("exit_reason_breakdown", {})
+    if er:
+        st.subheader("🚪 Exit Reason Breakdown")
+        er_df = pd.DataFrame([{"Reason": k, "Count": v["count"], "Avg Return": v["avg_return"], "Avg Days": v["avg_days_held"]} for k, v in er.items()])
+        total = er_df["Count"].sum()
+        er_df["%"] = (er_df["Count"] / total * 100).round(1)
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.dataframe(er_df[["Reason", "Count", "%", "Avg Return", "Avg Days"]], use_container_width=True, hide_index=True, column_config={"Avg Return": st.column_config.NumberColumn("Avg Return", format="%.2f%%"), "Avg Days": st.column_config.NumberColumn("Avg Days", format="%.1f"), "%": st.column_config.NumberColumn("%", format="%.1f%%")})
+        with c2:
+            colors = {"TP1": "#2ecc71", "TP2": "#27ae60", "TP3": "#1e8449", "SL": "#e74c3c", "TIMEOUT": "#f39c12"}
+            fig_er = px.pie(er_df, values="Count", names="Reason", color="Reason", color_discrete_map=colors)
+            fig_er.update_traces(textinfo="percent+label")
+            fig_er.update_layout(height=280, showlegend=False, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=10, b=10))
+            st.plotly_chart(fig_er, use_container_width=True)
+    
+    st.divider()
+    st.subheader("📋 Trade Log")
+    trades_df = pd.DataFrame(trades_log)
+    if not trades_df.empty:
+        st.dataframe(trades_df, use_container_width=True, hide_index=True)
+        csv = trades_df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Download Trade Log", csv, "portfolio_trades.csv", "text/csv")
+    
+    st.markdown("""
+    <div class="dyor-disclaimer" style="text-align:center; padding: 1rem; color:#90A4AE;"> ⚠ Think First. Trade Second. DYOR - Do Your Own Research </div>
+    """, unsafe_allow_html=True)
+
+def render_journal():
+    st.subheader("📋 Performance Journal")
+    init_db()
+    summary = get_journal_summary()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Predictions", summary["total_predictions"])
+    col2.metric("Pending", summary["pending"])
+    col3.metric("Active", summary["active"])
+    col4.metric("Closed", summary["closed"])
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Trades", summary["total_trades"])
+    col2.metric("Open Trades", summary["open_trades"])
+    col3.metric("Closed Trades", summary["closed_trades"])
+    
+    st.divider()
+    tab_pred, tab_trades = st.tabs(["📊 Predictions", "📈 Trade Results"])
+    with tab_pred:
+        status_filter = st.selectbox("Filter by Status", ["All", "PENDING", "ACTIVE", "CLOSED"], key="jrn_status")
+        ticker_filter = st.text_input("Filter by Ticker", key="jrn_ticker")
+        filters = {}
+        if status_filter != "All": filters["status"] = status_filter
+        if ticker_filter: filters["ticker"] = ticker_filter.upper()
+        preds = get_all_predictions(filters if filters else None)
+        if preds:
+            preds_df = pd.DataFrame(preds)
+            display_cols = ["id", "ticker", "setup", "signal", "price_at_signal", "stop_loss", "tp1", "timing", "score", "status", "screen_date"]
+            avail = [c for c in display_cols if c in preds_df.columns]
+            display_df = preds_df[avail].copy()
+            if "screen_date" in display_df.columns:
+                display_df["screen_date"] = display_df["screen_date"].apply(safe_screen_date_str)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No predictions found.")
+    with tab_trades:
+        exit_filter = st.selectbox("Filter by Exit Reason", ["All", "TP1", "TP2", "TP3", "SL", "TIMEOUT"], key="jrn_exit")
+        filters = {}
+        if exit_filter != "All": filters["exit_reason"] = exit_filter
+        trades = get_trade_results(filters if filters else None)
+        if trades:
+            trades_df = pd.DataFrame(trades)
+            st.dataframe(trades_df, use_container_width=True, hide_index=True)
+            if len(trades) > 1:
+                report = full_report(trades)
+                st.divider()
+                st.subheader("Summary")
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Win Rate", f"{report.get('win_rate', 0):.1%}")
+                col2.metric("Avg Return", f"{report.get('avg_return_pct', 0):+.2f}%")
+                col3.metric("Profit Factor", f"{report.get('profit_factor', 0):.2f}")
+                col4.metric("Sharpe", f"{report.get('sharpe_ratio', 0):.2f}")
+                er = report.get("exit_reason_breakdown", {})
+                if er:
+                    st.subheader("🚪 Exit Reason Breakdown")
+                    er_df = pd.DataFrame([{"Reason": k, "Count": v["count"], "Avg Return": v["avg_return"], "Avg Days": v["avg_days_held"]} for k, v in er.items()])
+                    total = er_df["Count"].sum()
+                    er_df["%"] = (er_df["Count"] / total * 100).round(1)
+                    c1, c2 = st.columns([2, 1])
+                    with c1:
+                        st.dataframe(er_df[["Reason", "Count", "%", "Avg Return", "Avg Days"]], use_container_width=True, hide_index=True, column_config={"Avg Return": st.column_config.NumberColumn("Avg Return", format="%.2f%%"), "Avg Days": st.column_config.NumberColumn("Avg Days", format="%.1f"), "%": st.column_config.NumberColumn("%", format="%.1f%%")})
+                    with c2:
+                        colors = {"TP1": "#2ecc71", "TP2": "#27ae60", "TP3": "#1e8449", "SL": "#e74c3c", "TIMEOUT": "#f39c12"}
+                        fig_er = px.pie(er_df, values="Count", names="Reason", color="Reason", color_discrete_map=colors)
+                        fig_er.update_traces(textinfo="percent+label")
+                        fig_er.update_layout(height=280, showlegend=False, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", margin=dict(l=20, r=20, t=10, b=10))
+                        st.plotly_chart(fig_er, use_container_width=True)
+        else:
+            st.info("No trade results found.")
+    
+    st.markdown("""
+    <div class="dyor-disclaimer" style="text-align:center; padding: 1rem; color:#90A4AE;"> ⚠ Think First. Trade Second. DYOR - Do Your Own Research </div>
+    """, unsafe_allow_html=True)
+
+# AUTO TRADE TAB
+def render_auto_trade():
+    st.subheader("🤖 Auto Trade")
+    if not HAS_GSPREAD or filter_screener_results is None:
+        st.error("❌ Module `gspread` or `google-auth` not installed. Install: `pip install gspread google-auth`")
+        return
+    
+    st.markdown("#### 📡 Live Status")
+    if "_gsheets_client" not in st.session_state:
+        st.session_state._gsheets_client = None
+    if st.session_state._gsheets_client is None:
+        client = GSheetsClient()
+        try:
+            client.connect()
+            st.session_state._gsheets_client = client
+        except FileNotFoundError:
+            st.error("❌ service_account.json not found. Place the file in the paper_trading folder.")
+            return
+        except Exception as e:
+            st.error(f"❌ Google Sheets connection failed: {e}")
+            return
+    
+    client = st.session_state._gsheets_client
+    with st.spinner("Loading trading status from Google Sheets..."):
+        try:
+            import time
+            now = time.time()
+            last_refresh = st.session_state.get("_gs_last_refresh", 0)
+            cache_valid = (now - last_refresh) < 60
+            if cache_valid and "_gs_data" in st.session_state:
+                gs = st.session_state._gs_data
+                open_trades = gs["open_trades"]
+                pending_orders = gs["pending_orders"]
+                modal = gs["modal"]
+            else:
+                open_trades = client.get_open_trades()
+                pending_orders = client.get_pending_orders()
+                modal = client.get_modal()
+                st.session_state._gs_data = {"open_trades": open_trades, "pending_orders": pending_orders, "modal": modal}
+                st.session_state._gs_last_refresh = now
+            
+            open_positions = len([t for t in open_trades if t["status"] in ("OPEN", "PARTIAL")])
+            pending_count = len(pending_orders)
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_orders = len([o for o in pending_orders if o["date"].startswith(today) and o["type"] == "BUY"])
+            open_tickers = {t["ticker"] for t in open_trades}
+            pending_tickers = {o["ticker"] for o in pending_orders}
+        except Exception as e:
+            st.error(f"❌ Gagal membaca data dari Google Sheets: {e}")
+            return
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("💰 Modal", f"Rp {modal:,.0f}")
+    col2.metric("📊 Positions", f"{open_positions}/{MAX_POSITIONS}")
+    col3.metric("📋 Pending", pending_count)
+    col4.metric("📅 Today Orders", f"{today_orders}/{MAX_AUTO_ORDERS_PER_DAY}")
+    
+    st.divider()
+    st.markdown("#### 🔎 Filter")
+    df = st.session_state.screening_df
+    if df is None or df.empty or "Setup" not in df.columns:
+        st.info("Run the screener first.")
+        return
+    
+    use_results_filters = st.checkbox("Ikuti filter Results tab", value=True, key="at_use_results")
+    if use_results_filters:
+        filtered = df.copy()
+        if hasattr(st.session_state, "_filter_setups") and st.session_state._filter_setups:
+            filtered = filtered[filtered["Setup"].isin(st.session_state._filter_setups)]
+        if hasattr(st.session_state, "_filter_regimes") and st.session_state._filter_regimes:
+            if "Stock Regime" in filtered.columns:
+                filtered = filtered[filtered["Stock Regime"].isin(st.session_state._filter_regimes)]
+        if "Stock Regime" in filtered.columns:
+            for setup_name, allowed_regimes in SETUP_ALLOWED_REGIMES.items():
+                mask = (filtered["Setup"] != setup_name) | (filtered["Stock Regime"].isin(allowed_regimes))
+                filtered = filtered[mask]
+        setup_scores = st.session_state.get("_filter_setup_scores", {})
+        if setup_scores:
+            mask = pd.Series(True, index=filtered.index)
+            for setup_name, min_sc in setup_scores.items():
+                setup_mask = (filtered["Setup"] != setup_name) | (filtered["Score"] >= min_sc)
+                mask = mask & setup_mask
+            filtered = filtered[mask]
+        elif st.session_state.get("filt_min_score", 0) > 0:
+            filtered = filtered[filtered["Score"] >= st.session_state.filt_min_score]
+        if st.session_state.get("filt_timing", "All") != "All":
+            filtered = filtered[filtered["Timing"] == st.session_state.filt_timing]
+    else:
+        mcol1, mcol2 = st.columns(2)
+        with mcol1:
+            at_min_score = st.slider("Min Score", 0, 100, 15, key="at_min_score")
+        with mcol2:
+            timing_opts = ["All"] + [k for k, v in TIMING_MAP.items() if v[0] in ("🟢", "🟡")]
+            at_timing = st.selectbox("Timing", timing_opts, key="at_timing")
+        filtered = df.copy()
+        if at_min_score > 0:
+            filtered = filtered[filtered["Score"] >= at_min_score]
+        if at_timing != "All":
+            filtered = filtered[filtered["Timing"] == at_timing]
+    
+    if filtered.empty:
+        st.warning("No results after filtering.")
+        return
+    
+    st.caption(f"Filtered: {len(filtered)} of {len(df)} total")
+    st.divider()
+    st.markdown("#### 📋 Preview Orders")
+    results_list = filtered.to_dict("records")
+    to_execute, to_watch, skipped = filter_screener_results(
+        results_list, open_tickers=open_tickers, pending_tickers=pending_tickers,
+        today_orders=today_orders, open_positions=open_positions, max_positions=MAX_POSITIONS
+    )
+    
+    preview_cols = ["Ticker", "Setup", "Score", "Price", "Timing", "Stock Regime"]
+    preview_col_config = {
+        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+        "Setup": st.column_config.TextColumn("Setup", width="medium"),
+        "Score": st.column_config.NumberColumn("Score", format="%.1f"),
+        "Price": st.column_config.NumberColumn("Price", format="Rp%.0f"),
+        "Timing": st.column_config.TextColumn("Timing", width="medium"),
+        "Stock Regime": st.column_config.TextColumn("Regime", width="small"),
+    }
+    
+    def _apply_row_color(df, bg_color):
+        return df.style.apply(lambda row: [f"background-color:{bg_color}; color:#1a1a2e"] * len(row), axis=1)
+    
+    def _color_setup_cell(val):
+        return f"background-color:{COLOR_MAP.get(val, '#888')}; color: black; font-weight: bold"
+    
+    if to_execute:
+        st.success(f"**✅ Execute ({len(to_execute)}):**")
+        exec_df = pd.DataFrame(to_execute)
+        exec_avail = [c for c in preview_cols if c in exec_df.columns]
+        styled_exec = _apply_row_color(exec_df[exec_avail], "#E6F4EA")
+        if "Setup" in exec_avail:
+            styled_exec = styled_exec.map(_color_setup_cell, subset=["Setup"])
+        st.dataframe(styled_exec, column_config=preview_col_config, use_container_width=True, hide_index=True)
+    
+    if to_watch:
+        st.info(f"**⏳ Watch ({len(to_watch)}):**")
+        watch_df = pd.DataFrame(to_watch)
+        watch_avail = [c for c in preview_cols if c in watch_df.columns]
+        styled_watch = _apply_row_color(watch_df[watch_avail], "#FFF8E1")
+        if "Setup" in watch_avail:
+            styled_watch = styled_watch.map(_color_setup_cell, subset=["Setup"])
+        st.dataframe(styled_watch, column_config=preview_col_config, use_container_width=True, hide_index=True)
+    
+    if skipped:
+        with st.expander(f"**⏭ Skip ({len(skipped)})** — Pilih untuk force execute"):
+            skip_df = pd.DataFrame(skipped)
+            skip_df["Force"] = False
+            editor_cols = ["Force", "Ticker", "Setup", "Score", "reason"]
+            editor_avail = [c for c in editor_cols if c in skip_df.columns]
+            disabled_indices = skip_df[skip_df.get("Force_disabled", False) == True].index.tolist()
+            edited = st.data_editor(
+                skip_df[editor_avail],
+                column_config={
+                    "Force": st.column_config.CheckboxColumn("⚡ Force", default=False),
+                    "Score": st.column_config.NumberColumn("Score", format="%.1f"),
+                    "reason": st.column_config.TextColumn("Reason", width="large"),
+                },
+                disabled=disabled_indices, hide_index=True, use_container_width=True, key="skip_editor"
+            )
+            forced_tickers = edited[edited["Force"] == True]["Ticker"].tolist()
+            if forced_tickers:
+                remaining = MAX_FORCE_ORDERS - len(forced_tickers)
+                if remaining < 0:
+                    st.error(f"⚠ Melebihi batas force orders! Maks {MAX_FORCE_ORDERS}. Terpilih: {len(forced_tickers)}")
+                else:
+                    st.warning(f"⚠ {len(forced_tickers)} orders di-force (sisa quota: {remaining})")
+                st.session_state._forced_tickers = forced_tickers
+            else:
+                st.session_state._forced_tickers = []
+    
+    if not to_execute and not to_watch and not skipped:
+        st.info("Tidak ada order yang bisa dieksekusi. Jalankan screening terlebih dahulu.")
+        return
+    if not to_execute and not to_watch and skipped:
+        st.warning("⚠ Tidak ada normal order. Gunakan **Force checkbox** di bawah untuk eksekusi manual.")
+    
+    st.divider()
+    st.markdown("#### 🚀 Execute")
+    dry_run = st.checkbox("🧪 Dry Run (simulate only, tidak buat order)", value=True, key="at_dry_run")
+    if st.button("🚀 Execute Auto Trade", type="primary", key="at_execute"):
+        forced = st.session_state.get("_forced_tickers", [])
+        all_execute = list(to_execute)
+        if forced:
+            for s in skipped:
+                if s.get("Ticker") in forced:
+                    for r in results_list:
+                        if r.get("Ticker") == s.get("Ticker"):
+                            all_execute.append(r)
+                            break
+        
+        total = len(all_execute)
+        normal_count = len(to_execute)
+        force_count = total - normal_count
+        
+        if not all_execute:
+            st.warning("Tidak ada order untuk dieksekusi.")
+        else:
+            if force_count > 0:
+                st.info(f"📋 Executing {normal_count} normal + {force_count} forced = {total} orders")
+            with st.spinner("Mengeksekusi order..."):
+                summary = auto_create_orders(all_execute, client=client, dry_run=dry_run, force=force_count > 0)
+                if summary:
+                    st.session_state._auto_trade_summary = summary
+                    if summary.get("orders_created"):
+                        st.success(f"**✅ Berhasil:** {len(summary['orders_created'])} order")
+                        for order in summary["orders_created"]:
+                            dry_tag = "(dry run)" if order.get("dry_run") else ""
+                            st.write(f"  • **{order['ticker']}** — {order['qty']} lots @ Rp {order['entry']:.2f} {dry_tag}")
+                    if summary.get("errors"):
+                        st.error(f"**❌ Error:** {len(summary['errors'])} order gagal")
+                        for err in summary["errors"]:
+                            st.write(f"  • **{err['ticker']}** — {err['error']}")
+                    st.rerun()
+                else:
+                    st.error("Execution failed. Silakan cek log.")
+    
+    if "_auto_trade_summary" in st.session_state and st.session_state._auto_trade_summary is not None:
+        summary = st.session_state._auto_trade_summary
+        if summary.get("orders_created") or summary.get("errors"):
+            st.divider()
+            st.markdown("#### 📊 Last Execution Summary")
+            scol1, scol2, scol3, scol4 = st.columns(4)
+            scol1.metric("Scanned", summary.get("total_scanned", 0))
+            scol2.metric("Execute", summary.get("to_execute", 0))
+            scol3.metric("Watch", summary.get("to_watch", 0))
+            scol4.metric("Skipped", summary.get("skipped", 0))
+    
+    st.markdown("""
+    <div class="dyor-disclaimer" style="text-align:center; padding: 1rem; color:#90A4AE;"> ⚠ Think First. Trade Second. DYOR - Do Your Own Research </div>
+    """, unsafe_allow_html=True)
+
+# MAIN
+def main():
+    render_sidebar()
+    if st.session_state.screening_done and st.session_state.screening_df is not None:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "📋 Results", "🎯 Trade Assistant", "🤖 Auto Trade", "📈 Performance"])
+        with tab1: render_dashboard()
+        with tab2: render_results()
+        with tab3: render_analysis()
+        with tab4: render_auto_trade()
+        with tab5: render_performance()
+    else:
+        st.markdown("""
+        <div style="text-align: center; padding: 2rem 0 1rem;">
+            <h1 style="font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, #42A5F5 0%, #26A69A 50%, #66BB6A 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -1px; margin-bottom: 0.5rem;">⚡ SWING SCREENER v2</h1>
+            <p style="color:#78909C; font-size: 1.15rem; margin-bottom: 2.5rem; font-weight: 400;">Professional IDX Stock Screening Tool with AI-Powered Ranking</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        fcol1, fcol2, fcol3 = st.columns(3)
+        with fcol1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 28px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="font-size: 2.5rem; margin-bottom: 12px;">🎯</div>
+                <h3 style="color:#ECEFF1; margin: 0 0 8px 0; font-size: 1.1rem;">9 Setup Types</h3>
+                <p style="color:#78909C; margin: 0; font-size: 0.85rem;">PRE_BREAKOUT, VCP, TIGHT_BASE, BULL_FLAG, BREAKOUT & more</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with fcol2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 28px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="font-size: 2.5rem; margin-bottom: 12px;">🤖</div>
+                <h3 style="color:#ECEFF1; margin: 0 0 8px 0; font-size: 1.1rem;">AI-Powered Ranking</h3>
+                <p style="color:#78909C; margin: 0; font-size: 0.85rem;">Reinforcement Learning scoring with Monte Carlo simulation</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with fcol3:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 28px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+                <div style="font-size: 2.5rem; margin-bottom: 12px;">📊</div>
+                <h3 style="color:#ECEFF1; margin: 0 0 8px 0; font-size: 1.1rem;">Deep Analysis</h3>
+                <p style="color:#78909C; margin: 0; font-size: 0.85rem;">Multi-TF, volume profile, trendlines, risk scenarios</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="background: linear-gradient(135deg,#1a1f2e 0%,#16192a 100%); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 32px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);">
+            <h3 style="color:#ECEFF1; text-align: center; margin: 0 0 24px 0;">Setup Types</h3>
+            <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;">
+                <span style="background:#FFA726; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">PRE_BREAKOUT</span>
+                <span style="background:#AB47BC; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">VCP</span>
+                <span style="background:#26A69A; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">TIGHT_BASE_BREAKOUT</span>
+                <span style="background:#5C6BC0; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">BASE_ON_BASE</span>
+                <span style="background:#FF7043; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">BULL_FLAG</span>
+                <span style="background:#66BB6A; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">BREAKOUT</span>
+                <span style="background:#FFCA28; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">PULLBACK_MA20</span>
+                <span style="background:#42A5F5; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">ACCUMULATION</span>
+                <span style="background:#EF5350; color:#000; padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;">EARLY_REVERSAL</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="dyor-disclaimer" style="text-align:center; padding: 1rem; color:#90A4AE;"> ⚠ Think First. Trade Second. DYOR - Do Your Own Research </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align: center; padding: 1rem;">
+            <p style="color:#90A4AE; font-size: 0.95rem;">👈 Click <strong>Run Screener</strong> in the sidebar to start scanning IDX stocks</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
